@@ -19,6 +19,7 @@ struct MissionEditorView: View {
     @State private var photoError: String?
     @FocusState private var isTyping: Bool
     @State private var practicing = false
+    @State private var takingPhotos = false
     /// Picked once per practice run, so redraws don't swap the challenge.
     @State private var practiceChallenge = Challenge.random()
 
@@ -78,13 +79,22 @@ struct MissionEditorView: View {
                 } footer: {
                     Text(Verifiers.isConfigured
                         ? "Take a photo now and see what the AI says. Doesn't touch your alarms. Uses the saved version of this proof."
-                        : "Add your OpenAI key in Settings to practice.")
+                        : "Set up how photos are checked in Settings to practice.")
                 }
             }
         }
         .fullScreenCover(isPresented: $practicing) {
             if let mission {
                 ProofCaptureView(mission: mission, challenge: practiceChallenge, mode: .practice)
+            }
+        }
+        .fullScreenCover(isPresented: $takingPhotos) {
+            ReferenceCameraView(remaining: Mission.maxPhotos - photos.count) { data in
+                if photos.count < Mission.maxPhotos,
+                   let jpeg = ImageResizer.jpegData(from: data),
+                   let draft = DraftPhoto(jpegData: jpeg) {
+                    photos.append(draft)
+                }
             }
         }
         .scrollDismissesKeyboard(.interactively)
@@ -156,6 +166,13 @@ struct MissionEditorView: View {
                     }
                 }
                 .disabled(isLoadingPhotos)
+                #if !targetEnvironment(simulator)
+                Button {
+                    takingPhotos = true
+                } label: {
+                    Label("Take photos now", systemImage: "camera")
+                }
+                #endif
             }
 
             if let photoError {

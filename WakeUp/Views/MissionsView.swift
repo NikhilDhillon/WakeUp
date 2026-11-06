@@ -7,7 +7,9 @@ struct MissionsView: View {
     @Query(sort: \Mission.createdAt) private var missions: [Mission]
     @AppStorage(ActiveMission.key) private var activeMissionID = ""
 
+    @Query private var alarms: [WakeAlarm]
     @State private var editing: EditorTarget?
+    @State private var pendingDelete: [Mission] = []
 
     var body: some View {
         List {
@@ -26,7 +28,7 @@ struct MissionsView: View {
                     ForEach(missions) { mission in
                         row(for: mission)
                     }
-                    .onDelete(perform: delete)
+                    .onDelete { offsets in pendingDelete = offsets.map { missions[$0] } }
                 } footer: {
                     Text("Tap the circle to choose which proof the alarm asks for.")
                 }
@@ -41,6 +43,17 @@ struct MissionsView: View {
                     Label("Add proof", systemImage: "plus")
                 }
             }
+        }
+        .confirmationDialog(
+            deleteTitle, isPresented: Binding(get: { !pendingDelete.isEmpty }, set: { if !$0 { pendingDelete = [] } }),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                delete(pendingDelete)
+                pendingDelete = []
+            }
+        } message: {
+            Text(deleteMessage)
         }
         .sheet(item: $editing) { target in
             NavigationStack {
@@ -96,8 +109,22 @@ struct MissionsView: View {
         ActiveMission.resolve(id: activeMissionID, in: missions)?.id == mission.id
     }
 
-    private func delete(at offsets: IndexSet) {
-        let removed = offsets.map { missions[$0] }
+    private var deleteTitle: String {
+        pendingDelete.count == 1 ? "Delete \"\(pendingDelete[0].name)\"?" : "Delete these proofs?"
+    }
+
+    private var deleteMessage: String {
+        let ids = Set(pendingDelete.map { $0.id.uuidString })
+        let using = alarms.filter { ids.contains($0.missionID) }.count
+        return using == 0
+            ? "This can't be undone."
+            : "\(using) alarm\(using == 1 ? " uses" : "s use") it and will switch to your default proof."
+    }
+
+    private func delete(_ removed: [Mission]) {
+        let ids = Set(removed.map { $0.id.uuidString })
+        // Alarms that pointed at a deleted proof go back to the default.
+        for alarm in alarms where ids.contains(alarm.missionID) { alarm.missionID = "" }
         let removedActive = removed.contains { $0.id.uuidString == activeMissionID }
         removed.forEach(context.delete)
         try? context.save()

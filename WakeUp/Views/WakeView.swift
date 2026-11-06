@@ -3,7 +3,7 @@ import SwiftUI
 
 /// The screen you land on from the ringing alarm. The only way to stop
 /// the chain is a live photo the AI accepts, unless there's nothing to
-/// check against (no proof or no API key), which gets an honest escape.
+/// check against (no proof or no way to check), which gets an honest escape.
 struct WakeView: View {
     @State private var coordinator = WakeCoordinator.shared
     @State private var alarmService = AlarmService.shared
@@ -12,6 +12,7 @@ struct WakeView: View {
     @State private var showingCamera = false
     @State private var passed = false
     @State private var passedOffline = false
+    @ScaledMetric(relativeTo: .largeTitle) private var symbolSize = 64
 
     private var mission: Mission? {
         ActiveMission.resolve(preferred: coordinator.activeSpec?.missionID, fallback: activeMissionID, in: missions)
@@ -22,33 +23,37 @@ struct WakeView: View {
     }
 
     var body: some View {
-        VStack(spacing: 28) {
-            Spacer()
+        // Scrolls, so large text sizes never push the buttons off screen.
+        ScrollView {
+            VStack(spacing: 24) {
+                Text(coordinator.isFollowUp ? "Still up?" : "Prove you're up")
+                    .font(.largeTitle.bold())
+                    .accessibilityAddTraits(.isHeader)
 
-            Text(coordinator.isFollowUp ? "Still up?" : "Prove you're up")
-                .font(.largeTitle.bold())
+                VStack(spacing: 12) {
+                    Image(systemName: coordinator.challenge.symbol)
+                        .font(.system(size: symbolSize))
+                        .foregroundStyle(.tint)
+                        .accessibilityHidden(true)
+                    Text(coordinator.isFollowUp ? "A different challenge this time" : "Today's challenge")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Text(coordinator.challenge.instruction)
+                        .font(.title2.weight(.semibold))
+                        .multilineTextAlignment(.center)
+                }
+                .accessibilityElement(children: .combine)
 
-            VStack(spacing: 12) {
-                Image(systemName: coordinator.challenge.symbol)
-                    .font(.system(size: 64))
-                    .foregroundStyle(.tint)
-                Text(coordinator.isFollowUp ? "A different challenge this time" : "Today's challenge")
-                    .font(.subheadline)
+                missionCard
+
+                Text(remainingText)
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
-                Text(coordinator.challenge.instruction)
-                    .font(.title2.weight(.semibold))
                     .multilineTextAlignment(.center)
             }
-
-            missionCard
-
-            Text(remainingText)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-
-            Spacer()
-
+            .padding(24)
+        }
+        .safeAreaInset(edge: .bottom) {
             VStack(spacing: 12) {
                 if canCheck {
                     Button {
@@ -81,8 +86,10 @@ struct WakeView: View {
                 }
                 .controlSize(.large)
             }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 12)
+            .background(.regularMaterial)
         }
-        .padding(24)
         .fullScreenCover(isPresented: $showingCamera, onDismiss: {
             if passed { coordinator.markPassed(offline: passedOffline) }
         }) {
@@ -103,7 +110,7 @@ struct WakeView: View {
         if !(mission?.isReady ?? false) {
             return "There's no proof set up, so nothing can be checked."
         }
-        return "There's no OpenAI key in Settings, so the photo can't be checked."
+        return "Photos can't be checked yet: add an OpenAI key, a service address or the on-phone check in Settings."
     }
 
     @ViewBuilder
@@ -124,6 +131,7 @@ struct WakeView: View {
                                     .scaledToFill()
                                     .frame(width: 64, height: 64)
                                     .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    .accessibilityLabel("Reference photo of \(mission.name)")
                             }
                         }
                     }
@@ -153,5 +161,5 @@ struct WakeView: View {
 
 #Preview {
     WakeView()
-        .modelContainer(for: [Mission.self, ReferencePhoto.self], inMemory: true)
+        .modelContainer(for: [Mission.self, ReferencePhoto.self, WakeAlarm.self, ProofAttempt.self], inMemory: true)
 }

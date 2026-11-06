@@ -1,4 +1,5 @@
 import AlarmKit
+import AVFoundation
 import SwiftData
 import SwiftUI
 
@@ -15,11 +16,15 @@ struct HomeView: View {
     @State private var hasAPIKey = AppSettings.hasAPIKey
     @State private var editing: AlarmEditorTarget?
     @State private var skipMessage: String?
+    @State private var showingSetup = false
+    @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+    @AppStorage(AppSettings.setupCompletedKey) private var setupCompleted = false
 
     var body: some View {
         NavigationStack {
             List {
                 permissionSection
+                warningsSection
                 alarmsSection
                 proofSection
                 Section("History") {
@@ -64,7 +69,13 @@ struct HomeView: View {
             .sheet(isPresented: $showingSettings, onDismiss: {
                 hasAPIKey = AppSettings.hasAPIKey
             }) {
-                SettingsView()
+                SettingsView(onRunSetup: { showingSetup = true })
+            }
+            .fullScreenCover(isPresented: $showingSetup, onDismiss: { setupCompleted = true }) {
+                OnboardingView()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in
+                lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
             }
             .sheet(item: $editing) { target in
                 NavigationStack {
@@ -85,11 +96,64 @@ struct HomeView: View {
             .onChange(of: alarms.map(\.spec)) { _, _ in
                 Task { await syncAlarms() }
             }
-            .task { await syncAlarms() }
+            .task {
+                // Brand-new installs get the setup flow; anyone with data already doesn't.
+                if !setupCompleted {
+                    if missions.isEmpty && alarms.isEmpty && !AppSettings.hasAPIKey {
+                        showingSetup = true
+                    } else {
+                        setupCompleted = true
+                    }
+                }
+                await syncAlarms()
+            }
         }
     }
 
     // MARK: Sections
+
+    /// Things that could stop tomorrow's alarm, in plain words.
+    @ViewBuilder
+    private var warningsSection: some View {
+        let warnings = HealthCheck.warnings(healthInputs)
+        if !warnings.isEmpty {
+            Section("Heads up") {
+                ForEach(warnings) { warning in
+                    Label(warning.message, systemImage: "exclamationmark.triangle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(.orange)
+                }
+            }
+        }
+    }
+
+    private var healthInputs: HealthInputs {
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        return HealthInputs(
+            alarmsAllowed: alarmService.authorization != .denied,
+            hasEnabledAlarm: alarms.contains(where: \.isEnabled),
+            lowPowerMode: lowPower,
+            batteryLevel: UIDevice.current.batteryLevel,
+            isCharging: UIDevice.current.batteryState == .charging || UIDevice.current.batteryState == .full,
+            daysSinceInstall: Self.daysSinceInstall(),
+            hasProof: activeMission?.isReady ?? false,
+            canCheckPhoto: Verifiers.isConfigured,
+            cameraDenied: AVCaptureDevice.authorizationStatus(for: .video) == .denied
+        )
+    }
+
+    /// Days since a development build was installed. nil for builds that
+    /// don't expire (App Store and TestFlight builds have no embedded profile).
+    private static func daysSinceInstall() -> Int? {
+        #if targetEnvironment(simulator)
+        return nil
+        #else
+        guard Bundle.main.path(forResource: "embedded", ofType: "mobileprovision") != nil,
+              let created = (try? FileManager.default.attributesOfItem(atPath: Bundle.main.bundlePath))?[.creationDate] as? Date
+        else { return nil }
+        return Calendar.current.dateComponents([.day], from: created, to: .now).day
+        #endif
+    }
 
     private var permissionSection: some View {
         Group {
@@ -169,7 +233,7 @@ struct HomeView: View {
                     Label("Set up your proof", systemImage: "camera.viewfinder")
                 }
             }
-            if !hasAPIKey {
+            if !Verifiers.isConfigured {
                 Button {
                     showingSettings = true
                 } label: {
