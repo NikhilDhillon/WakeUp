@@ -19,6 +19,8 @@ struct MissionEditorView: View {
     @State private var photoError: String?
     @FocusState private var isTyping: Bool
     @State private var practicing = false
+    /// Picked once per practice run, so redraws don't swap the challenge.
+    @State private var practiceChallenge = Challenge.random()
 
     init(mission: Mission?) {
         self.mission = mission
@@ -67,6 +69,7 @@ struct MissionEditorView: View {
             if let mission, mission.isReady {
                 Section {
                     Button {
+                        practiceChallenge = .random()
                         practicing = true
                     } label: {
                         Label("Practice with this proof", systemImage: "camera.viewfinder")
@@ -81,7 +84,7 @@ struct MissionEditorView: View {
         }
         .fullScreenCover(isPresented: $practicing) {
             if let mission {
-                ProofCaptureView(mission: mission, challenge: .random(), mode: .practice)
+                ProofCaptureView(mission: mission, challenge: practiceChallenge, mode: .practice)
             }
         }
         .scrollDismissesKeyboard(.interactively)
