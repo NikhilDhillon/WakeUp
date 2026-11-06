@@ -17,6 +17,7 @@ struct MissionEditorView: View {
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var isLoadingPhotos = false
     @State private var photoError: String?
+    @FocusState private var isTyping: Bool
 
     init(mission: Mission?) {
         self.mission = mission
@@ -30,11 +31,13 @@ struct MissionEditorView: View {
             Section("Name") {
                 TextField("e.g. Washroom", text: $name)
                     .textInputAutocapitalization(.words)
+                    .focused($isTyping)
             }
 
             Section {
                 TextEditor(text: $details)
                     .frame(minHeight: 110)
+                    .focused($isTyping)
                     .overlay(alignment: .topLeading) {
                         if details.isEmpty {
                             Text("Me sitting in the washroom with the light on and the sink behind me")
@@ -60,6 +63,7 @@ struct MissionEditorView: View {
                 }
             }
         }
+        .scrollDismissesKeyboard(.interactively)
         .navigationTitle(mission == nil ? "New proof" : "Edit proof")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -69,6 +73,10 @@ struct MissionEditorView: View {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save", action: save)
                     .disabled(!canSave)
+            }
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { isTyping = false }
             }
         }
         .onChange(of: pickerItems) { _, items in
