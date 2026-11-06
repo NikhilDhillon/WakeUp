@@ -156,7 +156,7 @@ struct HomeView: View {
             Text("Morning alarm")
         } footer: {
             if activeMission == nil {
-                Text("Set up your proof first. Until the camera check is built, the alarm accepts a test pass.")
+                Text("Set up your proof first, or the alarm can only be stopped without proof.")
             } else {
                 Text("Schedules one chain for the next time the clock shows this time.")
             }

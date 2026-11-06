@@ -51,6 +51,14 @@ enum VerifierError: LocalizedError, Equatable {
 }
 
 enum Verifiers {
+    /// Whether `current()` can actually check a photo.
+    static var isConfigured: Bool {
+        #if DEBUG
+        if UserDefaults.standard.string(forKey: "WakeUpMockVerdict") != nil { return true }
+        #endif
+        return AppSettings.hasAPIKey
+    }
+
     /// The verifier the app uses right now.
     static func current() -> WakeVerifier {
         #if DEBUG

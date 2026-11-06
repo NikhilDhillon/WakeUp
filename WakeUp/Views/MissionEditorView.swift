@@ -18,6 +18,7 @@ struct MissionEditorView: View {
     @State private var isLoadingPhotos = false
     @State private var photoError: String?
     @FocusState private var isTyping: Bool
+    @State private var practicing = false
 
     init(mission: Mission?) {
         self.mission = mission
@@ -61,6 +62,26 @@ struct MissionEditorView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+            }
+
+            if let mission, mission.isReady {
+                Section {
+                    Button {
+                        practicing = true
+                    } label: {
+                        Label("Practice with this proof", systemImage: "camera.viewfinder")
+                    }
+                    .disabled(!Verifiers.isConfigured)
+                } footer: {
+                    Text(Verifiers.isConfigured
+                        ? "Take a photo now and see what the AI says. Doesn't touch your alarms. Uses the saved version of this proof."
+                        : "Add your OpenAI key in Settings to practice.")
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $practicing) {
+            if let mission {
+                ProofCaptureView(mission: mission, challenge: .random(), mode: .practice)
             }
         }
         .scrollDismissesKeyboard(.interactively)

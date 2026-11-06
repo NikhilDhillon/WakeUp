@@ -39,6 +39,13 @@ final class WakeCoordinator {
         isShowingProof = false
     }
 
+    /// Used only when there's nothing to check against (no proof or no
+    /// API key). Cancels the chain without recording a proof.
+    func stopWithoutProof() {
+        AlarmService.shared.cancelChain()
+        isShowingProof = false
+    }
+
     /// Closes the proof screen. The rest of the chain still rings.
     func notYet() {
         isShowingProof = false

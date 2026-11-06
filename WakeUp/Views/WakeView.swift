@@ -1,14 +1,24 @@
 import SwiftData
 import SwiftUI
 
-/// The screen you land on from the ringing alarm.
-/// The camera and AI check (phase 3) aren't built yet, so there's a test
-/// button that counts as passing.
+/// The screen you land on from the ringing alarm. The only way to stop
+/// the chain is a live photo the AI accepts, unless there's nothing to
+/// check against (no proof or no API key), which gets an honest escape.
 struct WakeView: View {
     @State private var coordinator = WakeCoordinator.shared
     @State private var alarmService = AlarmService.shared
     @Query(sort: \Mission.createdAt) private var missions: [Mission]
     @AppStorage(ActiveMission.key) private var activeMissionID = ""
+    @State private var showingCamera = false
+    @State private var passed = false
+
+    private var mission: Mission? {
+        ActiveMission.resolve(id: activeMissionID, in: missions)
+    }
+
+    private var canCheck: Bool {
+        (mission?.isReady ?? false) && Verifiers.isConfigured
+    }
 
     var body: some View {
         VStack(spacing: 28) {
@@ -39,15 +49,30 @@ struct WakeView: View {
             Spacer()
 
             VStack(spacing: 12) {
-                Button {
-                    // Phase 3 replaces this with the camera and AI check.
-                    coordinator.markPassed()
-                } label: {
-                    Label("Test: count as passed", systemImage: "checkmark.seal.fill")
-                        .frame(maxWidth: .infinity)
+                if canCheck {
+                    Button {
+                        passed = false
+                        showingCamera = true
+                    } label: {
+                        Label("Take proof photo", systemImage: "camera.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                } else {
+                    Text(setupProblem)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    Button(role: .destructive) {
+                        coordinator.stopWithoutProof()
+                    } label: {
+                        Text("Stop alarms without proof")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
 
                 Button("Not yet") {
                     coordinator.notYet()
@@ -56,11 +81,27 @@ struct WakeView: View {
             }
         }
         .padding(24)
+        .fullScreenCover(isPresented: $showingCamera, onDismiss: {
+            if passed { coordinator.markPassed() }
+        }) {
+            if let mission {
+                ProofCaptureView(mission: mission, challenge: coordinator.challenge, mode: .wake) { _ in
+                    passed = true
+                }
+            }
+        }
+    }
+
+    private var setupProblem: String {
+        if !(mission?.isReady ?? false) {
+            return "There's no proof set up, so nothing can be checked."
+        }
+        return "There's no OpenAI key in Settings, so the photo can't be checked."
     }
 
     @ViewBuilder
     private var missionCard: some View {
-        if let mission = ActiveMission.resolve(id: activeMissionID, in: missions) {
+        if let mission {
             VStack(alignment: .leading, spacing: 10) {
                 Label("Go to: \(mission.name)", systemImage: "location.fill")
                     .font(.headline)
