@@ -10,7 +10,7 @@ You describe what "up" looks like (for example, *me sitting in the washroom with
 |---|---|---|
 | 0 | Xcode project, signing | Done |
 | 1 | AlarmKit alarm chain and "Prove I'm up" button | Built and tested in the simulator; the "Prove I'm up" button still needs testing on a real iPhone |
-| 2 | Missions: description and reference photos | Not started |
+| 2 | Proofs: description and reference photos | Done, tested in the simulator |
 | 3 | Live camera and the OpenAI check | Not started |
 | 4 | Full morning flow and follow-up check | Not started |
 | 5 | Tuning with test photos, offline fallback, history | Not started |
@@ -24,6 +24,18 @@ AlarmKit always shows a Stop button that apps can't remove. So a wake-up is a **
 - **Passing the check** cancels the rest of the chain.
 
 Opening the app yourself while a chain is going also takes you to the proof screen.
+
+## Proofs (phase 2)
+
+A proof is what the AI checks your morning photo against:
+
+- **Name**, like "Washroom"
+- **Description** in your own words, like "Me sitting in the washroom with the light on"
+- **3 to 5 reference photos** of the place, from the photo library
+
+Photos are shrunk to 1024 px on the long side (about 200–400 KB each) and stored on the phone with SwiftData. You can keep several proofs; the filled circle in the list marks the one the alarm uses. The wake screen shows where to go, your description and the reference photos under the day's challenge.
+
+Tested in the simulator: the editor won't save until all three parts are there and says what's missing; adding, removing and saving photos works; the proof survives an app restart and shows on the home and wake screens.
 
 ## Requirements
 
@@ -76,8 +88,14 @@ WakeUp/
   Wake/
     WakeCoordinator.swift  When to show the proof screen, what passing does
     Challenge.swift        Random challenges ("hold up 3 fingers" …)
+  Mission/
+    Mission.swift          Proof model (name, description, reference photos)
+    ActiveMission.swift    Which proof the alarm uses
+    ImageResizer.swift     Shrinks photos to 1024 px JPEGs
   Views/
-    HomeView.swift         Permission, test chain, morning alarm, alarm list
+    HomeView.swift         Permission, proof, test chain, morning alarm, alarm list
+    MissionsView.swift     List of proofs; pick the one the alarm uses
+    MissionEditorView.swift  Create or edit a proof
     WakeView.swift         The proof screen
 Config/Info.plist          Permission messages (alarms, camera, photos)
 ```
