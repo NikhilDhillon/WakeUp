@@ -8,6 +8,8 @@ struct HomeView: View {
     @State private var coordinator = WakeCoordinator.shared
     @Query(sort: \Mission.createdAt) private var missions: [Mission]
     @AppStorage(ActiveMission.key) private var activeMissionID = ""
+    @State private var showingSettings = false
+    @State private var hasAPIKey = AppSettings.hasAPIKey
     @State private var testCount = 3
     @State private var testIntervalMinutes = 1
     @State private var morningTime = Calendar.current.date(from: DateComponents(hour: 7, minute: 0)) ?? .now
@@ -40,6 +42,18 @@ struct HomeView: View {
             }
             .navigationTitle("WakeUp")
             .refreshable { alarmService.refresh() }
+            .toolbar {
+                Button {
+                    showingSettings = true
+                } label: {
+                    Label("Settings", systemImage: "gearshape")
+                }
+            }
+            .sheet(isPresented: $showingSettings, onDismiss: {
+                hasAPIKey = AppSettings.hasAPIKey
+            }) {
+                SettingsView()
+            }
         }
     }
 
@@ -86,6 +100,13 @@ struct HomeView: View {
                     }
                 } else {
                     Label("Set up your proof", systemImage: "camera.viewfinder")
+                }
+            }
+            if !hasAPIKey {
+                Button {
+                    showingSettings = true
+                } label: {
+                    Label("Add your OpenAI key to turn on the AI check", systemImage: "key")
                 }
             }
         } header: {
