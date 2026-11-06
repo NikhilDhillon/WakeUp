@@ -6,14 +6,18 @@ You describe what "up" looks like (for example, *me sitting in the washroom with
 
 ## Status
 
+The full plan for every phase, with open checks and risks, is in [PLAN.md](PLAN.md).
+
 | Phase | What | State |
 |---|---|---|
 | 0 | Xcode project, signing | Done |
 | 1 | AlarmKit alarm chain and "Prove I'm up" button | Built and tested in the simulator; the "Prove I'm up" button still needs testing on a real iPhone |
 | 2 | Proofs: description and reference photos | Done, tested in the simulator |
 | 3 | Live camera and the OpenAI check (Decisions API) | Built; unit tested; flow tested in the simulator with a mock verdict. Needs a real run with your key on the phone |
-| 4 | Full morning flow and follow-up check | Not started |
-| 5 | Tuning with test photos, offline fallback, history | Not started |
+| 4 | Real morning alarms: repeating days and the follow-up check | Next |
+| 5 | Accuracy, offline backup and history | Planned |
+| 6 | Polish and first-run setup | Planned |
+| 7 | Optional: sharing it with other people | Optional |
 
 ## How the alarm works
 
