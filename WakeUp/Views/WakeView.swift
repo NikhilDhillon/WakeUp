@@ -1,18 +1,22 @@
 import SwiftData
 import SwiftUI
+import UIKit
 
-/// The screen you land on from the ringing alarm. The only way to stop
-/// the chain is a live photo the AI accepts, unless there's nothing to
-/// check against (no proof or no way to check), which gets an honest escape.
+/// The screen you land on from the ringing alarm ("Bedside"): full white, a
+/// huge black challenge and one black button. The only way to stop the chain
+/// is a live photo the AI accepts, unless there's nothing to check against
+/// (no proof or no way to check), which gets an honest escape.
 struct WakeView: View {
     @State private var coordinator = WakeCoordinator.shared
     @State private var alarmService = AlarmService.shared
     @Query(sort: \Mission.createdAt) private var missions: [Mission]
     @AppStorage(ActiveMission.key) private var activeMissionID = ""
     @State private var showingCamera = false
+    @State private var showingPhotos = false
     @State private var passed = false
     @State private var passedOffline = false
-    @ScaledMetric(relativeTo: .largeTitle) private var symbolSize = 64
+    @State private var previousBrightness: CGFloat?
+    @ScaledMetric(relativeTo: .largeTitle) private var challengeSize = Theme.wakeChallengeSize
 
     private var mission: Mission? {
         ActiveMission.resolve(preferred: coordinator.activeSpec?.missionID, fallback: activeMissionID, in: missions)
@@ -23,73 +27,13 @@ struct WakeView: View {
     }
 
     var body: some View {
-        // Scrolls, so large text sizes never push the buttons off screen.
-        ScrollView {
-            VStack(spacing: 24) {
-                Text(coordinator.isFollowUp ? "Still up?" : "Prove you're up")
-                    .font(.largeTitle.bold())
-                    .accessibilityAddTraits(.isHeader)
-
-                VStack(spacing: 12) {
-                    Image(systemName: coordinator.challenge.symbol)
-                        .font(.system(size: symbolSize))
-                        .foregroundStyle(.tint)
-                        .accessibilityHidden(true)
-                    Text(coordinator.isFollowUp ? "A different challenge this time" : "Today's challenge")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Text(coordinator.challenge.instruction)
-                        .font(.title2.weight(.semibold))
-                        .multilineTextAlignment(.center)
-                }
-                .accessibilityElement(children: .combine)
-
-                missionCard
-
-                Text(remainingText)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(24)
+        // Re-reads the ring number and next ring time every few seconds.
+        TimelineView(.periodic(from: .now, by: 15)) { timeline in
+            content(now: timeline.date)
         }
-        .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 12) {
-                if canCheck {
-                    Button {
-                        passed = false
-                        passedOffline = false
-                        showingCamera = true
-                    } label: {
-                        Label("Take proof photo", systemImage: "camera.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                } else {
-                    Text(setupProblem)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                    Button(role: .destructive) {
-                        coordinator.stopWithoutProof()
-                    } label: {
-                        Text("Stop alarms without proof")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                }
-
-                Button("Not yet") {
-                    coordinator.notYet()
-                }
-                .controlSize(.large)
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 12)
-            .background(.regularMaterial)
-        }
+        .preferredColorScheme(.light)
+        .onAppear(perform: raiseBrightness)
+        .onDisappear(perform: restoreBrightness)
         .fullScreenCover(isPresented: $showingCamera, onDismiss: {
             if passed { coordinator.markPassed(offline: passedOffline) }
         }) {
@@ -106,6 +50,165 @@ struct WakeView: View {
         }
     }
 
+    private func content(now: Date) -> some View {
+        let position = coordinator.activeChain?.ringPosition(at: now)
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(topLine(position))
+                    .font(.headline)
+                    .foregroundStyle(Theme.wakeSecondary)
+                    .accessibilityAddTraits(.isHeader)
+
+                Text(coordinator.challenge.instruction)
+                    .font(.system(size: challengeSize, weight: .heavy))
+                    .foregroundStyle(Theme.wakeInk)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.6)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                placeBlock
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 24)
+            .padding(.top, 48)
+            .padding(.bottom, 24)
+        }
+        .background(Theme.wakeBackground.ignoresSafeArea())
+        .safeAreaInset(edge: .bottom) {
+            bottomBar(position)
+        }
+    }
+
+    private func topLine(_ position: (current: Int, total: Int, next: Date?)?) -> String {
+        if coordinator.isFollowUp { return "Still up?" }
+        guard let position, position.total > 1 else { return "Prove you're up" }
+        return "Ring \(position.current) of \(position.total)"
+    }
+
+    // MARK: Place
+
+    @ViewBuilder
+    private var placeBlock: some View {
+        if let mission {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(mission.name)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Theme.wakeInk)
+                Text(firstLine(of: mission.proofDescription))
+                    .font(.title3)
+                    .foregroundStyle(Theme.wakeSecondary)
+                if !mission.orderedPhotos.isEmpty {
+                    Button(showingPhotos ? "Hide photos" : "Show photos") {
+                        withAnimation { showingPhotos.toggle() }
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.wakeInk)
+                    .frame(minHeight: Theme.minTapHeight, alignment: .leading)
+                    if showingPhotos {
+                        photoStrip(mission)
+                    }
+                }
+            }
+            .accessibilityElement(children: .contain)
+        } else {
+            Text("No proof set up yet. Add one from the home screen.")
+                .font(.subheadline)
+                .foregroundStyle(Theme.wakeSecondary)
+        }
+    }
+
+    private func photoStrip(_ mission: Mission) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(mission.orderedPhotos) { photo in
+                    if let image = UIImage(data: photo.jpegData) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 96, height: 96)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .accessibilityLabel("Reference photo of \(mission.name)")
+                    }
+                }
+            }
+        }
+    }
+
+    private func firstLine(of text: String) -> String {
+        text.split(whereSeparator: \.isNewline).first.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? text
+    }
+
+    // MARK: Buttons
+
+    private func bottomBar(_ position: (current: Int, total: Int, next: Date?)?) -> some View {
+        VStack(spacing: 10) {
+            if canCheck {
+                Button {
+                    passed = false
+                    passedOffline = false
+                    showingCamera = true
+                } label: {
+                    Text("Open camera")
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(Theme.wakeBackground)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .padding(.vertical, 12)
+                        .frame(maxWidth: .infinity, minHeight: 64)
+                        .background(Theme.wakeInk, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            } else {
+                Text(setupProblem)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.wakeSecondary)
+                    .multilineTextAlignment(.center)
+                Button {
+                    coordinator.stopWithoutProof()
+                } label: {
+                    Text("Stop alarms without proof")
+                        .font(.headline)
+                        .foregroundStyle(Theme.wakeInk)
+                        .frame(maxWidth: .infinity, minHeight: 56)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                .strokeBorder(Theme.wakeInk, lineWidth: 2)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+
+            Button {
+                coordinator.notYet()
+            } label: {
+                VStack(spacing: 2) {
+                    Text("Not yet")
+                        .font(.body)
+                    Text(nextRingText(position))
+                        .font(.footnote)
+                }
+                .foregroundStyle(Theme.wakeSecondary)
+                .frame(maxWidth: .infinity, minHeight: Theme.minTapHeight)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Not yet. \(nextRingText(position))")
+            .accessibilityAddTraits(.isButton)
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+        // The buttons stay on screen at the largest text sizes; the challenge above scrolls.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+        .background(Theme.wakeBackground)
+    }
+
+    private func nextRingText(_ position: (current: Int, total: Int, next: Date?)?) -> String {
+        guard let next = position?.next else { return "This is the last ring" }
+        return "Next ring at \(next.formatted(.dateTime.hour().minute()))"
+    }
+
     private var setupProblem: String {
         if !(mission?.isReady ?? false) {
             return "There's no proof set up, so nothing can be checked."
@@ -113,53 +216,34 @@ struct WakeView: View {
         return "Photos can't be checked yet: add an OpenAI key, a service address or the on-phone check in Settings."
     }
 
-    @ViewBuilder
-    private var missionCard: some View {
-        if let mission {
-            VStack(alignment: .leading, spacing: 10) {
-                Label("Go to: \(mission.name)", systemImage: "location.fill")
-                    .font(.headline)
-                Text(mission.proofDescription)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(mission.orderedPhotos) { photo in
-                            if let image = UIImage(data: photo.jpegData) {
-                                Image(uiImage: image)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 64, height: 64)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                    .accessibilityLabel("Reference photo of \(mission.name)")
-                            }
-                        }
-                    }
-                }
-            }
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 14))
-        } else {
-            Label("No proof set up yet. Add one from the home screen.", systemImage: "exclamationmark.circle")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        }
+    // MARK: Brightness
+
+    private var screen: UIScreen? {
+        (UIApplication.shared.connectedScenes.first { $0.activationState == .foregroundActive } as? UIWindowScene)?.screen
     }
 
-    private var remainingText: String {
-        let remaining = coordinator.activeChain.map { chain in
-            alarmService.alarms(in: chain).filter { $0.state == .scheduled }.count
-        } ?? 0
-        switch remaining {
-        case 0: return "This is the last alarm in the chain."
-        case 1: return "1 more alarm will ring until you pass."
-        default: return "\(remaining) more alarms will ring until you pass."
-        }
+    /// Full brightness while the wake screen is up. iOS keeps the value until
+    /// the screen locks, so it's put back when the screen goes away.
+    private func raiseBrightness() {
+        guard let screen, previousBrightness == nil else { return }
+        previousBrightness = screen.brightness
+        screen.brightness = 1
+    }
+
+    private func restoreBrightness() {
+        guard let screen, let previous = previousBrightness else { return }
+        screen.brightness = previous
+        previousBrightness = nil
     }
 }
 
 #Preview {
     WakeView()
         .modelContainer(for: [Mission.self, ReferencePhoto.self, WakeAlarm.self, ProofAttempt.self], inMemory: true)
+}
+
+#Preview("AX5") {
+    WakeView()
+        .modelContainer(for: [Mission.self, ReferencePhoto.self, WakeAlarm.self, ProofAttempt.self], inMemory: true)
+        .environment(\.dynamicTypeSize, .accessibility5)
 }

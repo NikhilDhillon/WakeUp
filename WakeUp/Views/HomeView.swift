@@ -17,39 +17,75 @@ struct HomeView: View {
     @State private var editing: AlarmEditorTarget?
     @State private var skipMessage: String?
     @State private var showingSetup = false
+    @State private var showingPlaces = false
+    @State private var showingHistory = false
+    @State private var showingStatusDetails = false
+    /// Ticks every minute so "next alarm" stays right while the app is open.
+    @State private var now = Date.now
     @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
     @AppStorage(AppSettings.setupCompletedKey) private var setupCompleted = false
 
     var body: some View {
         NavigationStack {
             List {
-                permissionSection
-                warningsSection
-                alarmsSection
-                proofSection
-                Section("History") {
-                    NavigationLink {
-                        HistoryView()
-                    } label: {
-                        StreakRow(streak: HistoryView.streak(attempts: attempts, alarms: alarms))
+                if let status {
+                    StatusPill(
+                        status: status,
+                        onAction: perform,
+                        onShowAll: { showingStatusDetails = true }
+                    )
+                    .plainRow(top: 4)
+                }
+
+                if let pick, let alarm = alarms.first(where: { $0.id == pick.alarmID }) {
+                    NextAlarmCard(
+                        alarm: alarm,
+                        mission: mission(for: alarm),
+                        ring: pick.ring,
+                        onEdit: { editing = .existing(alarm) },
+                        onOpenPlace: { showingPlaces = true },
+                        onToggleSkip: { toggleSkip(alarm) }
+                    )
+                    .plainRow(top: 6, bottom: 8)
+                } else {
+                    emptyCard.plainRow(top: 6, bottom: 8)
+                }
+
+                if !otherAlarms.isEmpty {
+                    Text("Other alarms")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.inkSecondary)
+                        .accessibilityAddTraits(.isHeader)
+                        .plainRow(top: 10, bottom: 0)
+
+                    ForEach(otherAlarms) { alarm in
+                        AlarmRowCompact(
+                            alarm: alarm,
+                            placeName: namedPlace(for: alarm)?.name,
+                            onEdit: { editing = .existing(alarm) }
+                        )
+                        .plainRow()
                     }
-                    if let lastPassed = coordinator.lastPassed {
-                        Label {
-                            Text("Last proof: \(lastPassed, format: .dateTime.weekday(.wide).hour().minute())")
-                        } icon: {
-                            Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
-                        }
+                    .onDelete { offsets in
+                        for index in offsets { context.delete(otherAlarms[index]) }
                     }
                 }
-                if let error = alarmService.lastError {
-                    Section {
-                        Label(error, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.red)
+
+                if !alarms.isEmpty {
+                    Button { showingHistory = true } label: {
+                        WeekStrip(streak: streak, days: recentDays)
                     }
+                    .buttonStyle(.plain)
+                    .plainRow(top: 14, bottom: 24)
                 }
             }
-            .navigationTitle("WakeUp")
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(Theme.ground)
+            .navigationTitle("Alarms")
             .refreshable { await syncAlarms() }
+            .navigationDestination(isPresented: $showingPlaces) { MissionsView() }
+            .navigationDestination(isPresented: $showingHistory) { HistoryView() }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
@@ -62,8 +98,18 @@ struct HomeView: View {
                     Button {
                         editing = .new
                     } label: {
-                        Label("Add alarm", systemImage: "plus")
+                        Image(systemName: "plus")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(Theme.onAccent)
                     }
+                    .accessibilityLabel("Add alarm")
+                    .buttonStyle(.borderedProminent)
+                    .tint(.accentColor)
+                }
+            }
+            .sheet(isPresented: $showingStatusDetails) {
+                if let status {
+                    StatusDetailsSheet(status: status, onAction: perform)
                 }
             }
             .sheet(isPresented: $showingSettings, onDismiss: {
@@ -77,6 +123,7 @@ struct HomeView: View {
             .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in
                 lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
             }
+            .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { now = $0 }
             .sheet(item: $editing) { target in
                 NavigationStack {
                     switch target {
@@ -97,6 +144,9 @@ struct HomeView: View {
                 Task { await syncAlarms() }
             }
             .task {
+                #if DEBUG
+                DebugSeed.run(in: context)
+                #endif
                 // Brand-new installs get the setup flow; anyone with data already doesn't.
                 if !setupCompleted {
                     if missions.isEmpty && alarms.isEmpty && !AppSettings.hasAPIKey {
@@ -110,20 +160,109 @@ struct HomeView: View {
         }
     }
 
-    // MARK: Sections
+    // MARK: Derived state
 
-    /// Things that could stop tomorrow's alarm, in plain words.
-    @ViewBuilder
-    private var warningsSection: some View {
-        let warnings = HealthCheck.warnings(healthInputs)
-        if !warnings.isEmpty {
-            Section("Heads up") {
-                ForEach(warnings) { warning in
-                    Label(warning.message, systemImage: "exclamationmark.triangle.fill")
-                        .font(.subheadline)
-                        .foregroundStyle(.orange)
-                }
+    private var specs: [AlarmSpec] { alarms.map(\.spec) }
+
+    private var pick: NextUp.Pick? { NextUp.pick(specs: specs, now: now) }
+
+    private var otherAlarms: [WakeAlarm] {
+        alarms.filter { $0.id != pick?.alarmID }
+    }
+
+    private var status: HomeStatus? {
+        HomeStatus.make(
+            warnings: HealthCheck.warnings(healthInputs),
+            lastError: alarmService.lastError,
+            authorizationNotDetermined: alarmService.authorization == .notDetermined,
+            hasAlarms: !alarms.isEmpty,
+            hasEnabledAlarm: alarms.contains(where: \.isEnabled),
+            nextRing: pick?.ring,
+            now: now
+        )
+    }
+
+    private var streak: Int {
+        HistoryView.streak(attempts: attempts, alarms: alarms, now: now)
+    }
+
+    private var recentDays: [(day: Date, mark: DayMark)] {
+        let passDays = Set(attempts.filter { $0.kind == .wake && $0.passed }.map(\.date))
+        let weekdays = alarms.filter(\.isEnabled).reduce(into: Set<Int>()) { $0.formUnion($1.weekdays) }
+        return HistoryMath.recentDays(
+            passDays: passDays,
+            alarmWeekdays: weekdays,
+            skippedDays: Set(alarms.flatMap(\.skippedDays)),
+            trackingSince: alarms.map(\.createdAt).min(),
+            now: now
+        )
+    }
+
+    private var activeMission: Mission? {
+        ActiveMission.resolve(id: activeMissionID, in: missions)
+    }
+
+    /// The proof an alarm uses: its own, or the default.
+    private func mission(for alarm: WakeAlarm) -> Mission? {
+        ActiveMission.resolve(
+            preferred: alarm.missionID.isEmpty ? nil : alarm.missionID, fallback: activeMissionID, in: missions
+        )
+    }
+
+    /// The alarm's own proof, or nil when it uses the default.
+    private func namedPlace(for alarm: WakeAlarm) -> Mission? {
+        missions.first { $0.id.uuidString == alarm.missionID }
+    }
+
+    // MARK: Pieces
+
+    private var emptyCard: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "alarm")
+                .font(.largeTitle)
+                .foregroundStyle(Theme.inkSecondary)
+                .accessibilityHidden(true)
+            Text("Set your first alarm")
+                .font(.title3.weight(.semibold))
+            Text("Set the time and the days once. It rings every morning on its own until you prove you're up.")
+                .font(.subheadline)
+                .foregroundStyle(Theme.inkSecondary)
+                .multilineTextAlignment(.center)
+            Button {
+                editing = .new
+            } label: {
+                Label("Add an alarm", systemImage: "plus")
+                    .font(.headline)
+                    .foregroundStyle(Theme.onAccent)
+                    .frame(maxWidth: .infinity, minHeight: 52)
             }
+            .buttonStyle(.borderedProminent)
+            .tint(.accentColor)
+        }
+        .padding(Theme.cardPadding)
+        .frame(maxWidth: .infinity)
+        .background {
+            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                .fill(Theme.card)
+                .cardShadow()
+        }
+    }
+
+    /// What the status pill's button does.
+    private func perform(_ action: StatusAction) {
+        switch action {
+        case .retry:
+            Task { await syncAlarms() }
+        case .openSystemSettings:
+            if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+        case .chooseProof:
+            showingPlaces = true
+        case .openAppSettings:
+            showingSettings = true
+        case .showDetails:
+            showingStatusDetails = true
+        case .requestAuthorization:
+            Task { await alarmService.requestAuthorization() }
         }
     }
 
@@ -153,102 +292,6 @@ struct HomeView: View {
         else { return nil }
         return Calendar.current.dateComponents([.day], from: created, to: .now).day
         #endif
-    }
-
-    private var permissionSection: some View {
-        Group {
-            switch alarmService.authorization {
-            case .authorized:
-                EmptyView()
-            case .denied:
-                Section {
-                    Label("Alarms blocked. Turn them on in Settings > WakeUp.", systemImage: "xmark.octagon.fill")
-                        .foregroundStyle(.red)
-                }
-            case .notDetermined:
-                Section {
-                    Button("Allow alarms") {
-                        Task { await alarmService.requestAuthorization() }
-                    }
-                }
-            @unknown default:
-                EmptyView()
-            }
-        }
-    }
-
-    private var alarmsSection: some View {
-        Section {
-            if alarms.isEmpty {
-                ContentUnavailableView {
-                    Label("No alarms yet", systemImage: "alarm")
-                } description: {
-                    Text("Set the time and the days once. It rings every morning on its own until you prove you're up.")
-                } actions: {
-                    Button("Add an alarm") { editing = .new }
-                        .buttonStyle(.borderedProminent)
-                }
-                .listRowBackground(Color.clear)
-            }
-            ForEach(alarms) { alarm in
-                AlarmRow(
-                    alarm: alarm,
-                    onEdit: { editing = .existing(alarm) },
-                    onToggleSkip: { toggleSkip(alarm) }
-                )
-            }
-            .onDelete { offsets in
-                for index in offsets { context.delete(alarms[index]) }
-            }
-        } header: {
-            Text("Alarms")
-        } footer: {
-            if !alarms.isEmpty {
-                Text("Mornings are scheduled a few days ahead, so the alarm rings even if you don't open the app.")
-            }
-        }
-    }
-
-    private var activeMission: Mission? {
-        ActiveMission.resolve(id: activeMissionID, in: missions)
-    }
-
-    private var proofSection: some View {
-        Section {
-            NavigationLink {
-                MissionsView()
-            } label: {
-                if let mission = activeMission {
-                    HStack(spacing: 12) {
-                        MissionThumbnail(mission: mission, size: 44)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(mission.name).font(.headline)
-                            Text(mission.proofDescription)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                        }
-                    }
-                } else {
-                    Label("Set up your proof", systemImage: "camera.viewfinder")
-                }
-            }
-            if !Verifiers.isConfigured {
-                Button {
-                    showingSettings = true
-                } label: {
-                    Label("Add your OpenAI key to turn on the AI check", systemImage: "key")
-                }
-            }
-        } header: {
-            Text("Default proof")
-        } footer: {
-            if activeMission == nil {
-                Text("Describe what proves you're up and add a few photos of the place.")
-            } else {
-                Text("Alarms use this proof unless you pick another one for them.")
-            }
-        }
     }
 
     // MARK: Actions
@@ -293,60 +336,12 @@ enum AlarmEditorTarget: Identifiable {
     }
 }
 
-/// One alarm in the list: the time, the days, an on/off switch and the
-/// "Skip" button for the next morning.
-private struct AlarmRow: View {
-    @Bindable var alarm: WakeAlarm
-    var onEdit: () -> Void
-    var onToggleSkip: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Button(action: onEdit) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(alarm.timeOfDay, format: .dateTime.hour().minute())
-                            .font(.system(.largeTitle, design: .rounded, weight: .light))
-                        Text(subtitle)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .buttonStyle(.plain)
-                Spacer()
-                Toggle("Alarm on", isOn: $alarm.isEnabled)
-                    .labelsHidden()
-            }
-            if alarm.isEnabled, let skippable = SchedulePlanner.skippableOccurrence(of: alarm.spec, after: .now) {
-                let skipping = alarm.skippedDays.contains { Calendar.current.isDate($0, inSameDayAs: skippable.day) }
-                HStack {
-                    if let next = SchedulePlanner.nextRing(of: alarm.spec, after: .now) {
-                        Label {
-                            Text("Next: \(next, format: .dateTime.weekday(.abbreviated).hour().minute())")
-                        } icon: {
-                            Image(systemName: "bell")
-                        }
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button(skipping ? "Undo skip" : "Skip \(skippable.day.formatted(.dateTime.weekday(.abbreviated)))") {
-                        onToggleSkip()
-                    }
-                    .font(.footnote.weight(.semibold))
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-            }
-        }
-        .padding(.vertical, 4)
-        .opacity(alarm.isEnabled ? 1 : 0.55)
-        .accessibilityElement(children: .contain)
-    }
-
-    private var subtitle: String {
-        let days = WakeAlarm.summary(of: alarm.weekdays)
-        return alarm.label.isEmpty ? days : "\(alarm.label), \(days)"
+extension View {
+    /// A list row with no separator or background, padded to the screen margin.
+    func plainRow(top: CGFloat = 4, bottom: CGFloat = 4) -> some View {
+        listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets(top: top, leading: Theme.screenMargin, bottom: bottom, trailing: Theme.screenMargin))
     }
 }
 
