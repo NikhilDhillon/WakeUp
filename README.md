@@ -14,10 +14,10 @@ The full plan for every phase, with open checks and risks, is in [PLAN.md](PLAN.
 | 1 | AlarmKit alarm chain and "Prove I'm up" button | Built and tested in the simulator; the "Prove I'm up" button still needs testing on a real iPhone |
 | 2 | Proofs: description and reference photos | Done, tested in the simulator |
 | 3 | Live camera and the OpenAI check (Decisions API) | Built; unit tested; flow tested in the simulator with a mock verdict. Needs a real run with your key on the phone |
-| 4 | Real morning alarms: repeating days and the follow-up check | Next |
-| 5 | Accuracy, offline backup and history | Planned |
-| 6 | Polish and first-run setup | Planned |
-| 7 | Optional: sharing it with other people | Optional |
+| 4 | Real morning alarms: repeating days and the follow-up check | Built and unit tested; not yet tried on the phone |
+| 5 | Accuracy, offline backup and history | Built and unit tested; `eval/` needs your photos |
+| 6 | Polish and first-run setup | Built (no widget) |
+| 7 | Optional: sharing it with other people | Proxy, in-app service option and docs done; shipping needs the paid developer program |
 
 ## How the alarm works
 
@@ -75,7 +75,24 @@ The simulator has no camera, so simulator builds show a library photo button ins
 
 ### Tests
 
-**Product > Test** (⌘U) runs 30 unit tests: the per-check pass rules, both verifiers' request bodies (Decisions predicates; Responses JSON schema), reply parsing (refusals, missing answers, cut-off answers, HTTP errors) against a stubbed network, and photo resizing.
+**Product > Test** (⌘U) runs the unit tests: the per-check pass rules, both verifiers' request bodies (Decisions predicates; Responses JSON schema), reply parsing (refusals, missing answers, cut-off answers, HTTP errors) against a stubbed network, and photo resizing.
+
+## Alarms, follow-up and skipping (phase 4)
+
+Add alarms on the home screen: a time, the days, an optional proof, how many times it re-rings and a follow-up delay. The app schedules each alarm's chain for the next few mornings and tops them up whenever it opens, after each pass and in a nightly background refresh, so it rings even on days you don't open it. After a pass, **Still up?** rings once more after the follow-up delay with a different challenge. **Skip** (next to an alarm) skips the next morning; it must be done the day before, and at most 2 skips are allowed in any 7 days. A developer switch in Settings shows test alarms and what's scheduled.
+
+## History, offline backup and accuracy (phase 5)
+
+- **History** lists each morning's checks, when you were up, how many tries it took and a streak (days without an alarm or with a skip don't break it). Photos aren't kept; an optional 200 px thumbnail can be.
+- **Offline backup:** if OpenAI can't be reached after a retry (20 s timeout), a check on the phone with Apple's Vision looks for a face and the right place. It's weaker, so it's labelled "Checked offline" and a follow-up always comes.
+- **Per-check thresholds:** strictness sets the base; the place check is held 5 points higher and the awake check 10 lower.
+- **`eval/`:** `python3 eval/run_eval.py` scores labelled photos; see [eval/README.md](eval/README.md).
+
+## Setup, polish and sharing (phases 6 and 7)
+
+First launch walks through permissions, how photos are checked, a first proof (reference photos can be taken with the camera), a practice run and a first alarm. The home screen warns about blocked alarms, a low battery, Low Power Mode and a development build about to expire. There's an app icon, a loud alarm sound option and a warning before deleting a proof an alarm uses.
+
+To let other people use it without their own key, deploy [proxy/](proxy/README.md) and choose **Check with > WakeUp service** in Settings. Photos are only sent after the user agrees to a notice, and **On this phone only** sends nothing. Drafts for the App Store are in [docs/](docs/).
 
 ## Requirements
 

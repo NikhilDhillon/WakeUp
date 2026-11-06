@@ -4,7 +4,7 @@ An iPhone alarm that keeps ringing until an AI checks a live photo and agrees yo
 
 This plan covers every phase: what's built, what's left, and how each remaining phase gets done. It's written for one user (you) on one iPhone. Phase 7 covers what changes if other people use it.
 
-_Last updated: November 5, 2026_
+_Last updated: November 6, 2026_
 
 ## At a glance
 
@@ -14,12 +14,25 @@ _Last updated: November 5, 2026_
 | 1 | Alarm chain and "Prove I'm up" button | ✅ Built, one item to check on the phone | — |
 | 2 | Proofs: description and reference photos | ✅ Done | — |
 | 3 | Live camera and the AI check (Decisions API) | ✅ Built, needs a real run with your key | — |
-| 4 | Real morning alarms: repeating days and the follow-up check | Next | ~1 day |
-| 5 | Accuracy, offline backup and history | Planned | 1–2 days |
-| 6 | Polish and first-run setup | Planned | ~1 day |
-| 7 | Optional: sharing it with other people | Optional | 2+ days |
+| 4 | Real morning alarms: repeating days and the follow-up check | ✅ Built, unit tested; not yet run on the phone | — |
+| 5 | Accuracy, offline backup and history | ✅ Built, unit tested; the photo evaluation needs your photos | — |
+| 6 | Polish and first-run setup | ✅ Built (no widget); needs a week of real mornings | — |
+| 7 | Optional: sharing it with other people | ✅ Code and docs in the repo; needs the paid program to ship | — |
 
-**Before phase 4, run the phone checks in [Open checks](#open-checks).** Phase 4 builds on the alarm button and the AI check, and both have only been tested in the simulator.
+**Everything from phase 3 on has only been tested in the simulator and with unit tests.** Run the phone checks in [Open checks](#open-checks) and the phase 4 morning test below before trusting it.
+
+### What was built differently from the plan
+
+- **Scheduling (4.2):** I used the fallback. Each alarm keeps fixed-date chains scheduled for the next four calendar days, topped up when the app opens, after every pass, on a time-zone change, and by a background refresh (`BGAppRefreshTask`). I couldn't test how AlarmKit treats repeating alarms when one is stopped, so I built on fixed alarms, which are known to work. If iOS refuses alarms (`maximumLimitReached`) the app learns the limit and schedules fewer days. The limit is still unknown.
+- **Follow-up (4.4):** the "Still up?" chain is 4 alarms with a different challenge. Ignoring it just keeps ringing, which is the "back into the main chain" behaviour; a chain that rings out unanswered is recorded as "went back to bed".
+- **Per-check thresholds (5.1):** the mechanism and starting offsets are in (`ProofThresholds`: place +5, awake −10 points). They're guesses until `eval/run_eval.py` runs on your photos.
+- **Offline distances (5.2):** the Vision feature-print distances that count as the "same place" are starting values too.
+- **Lock Screen widget (6):** skipped. It needs a new Xcode target, which is risky in a hand-written project file, and it was optional.
+- **Phase 7:** the Cloudflare Worker (`proxy/`), the in-app service address, the photo-upload notice, an on-phone-only mode, and drafts of the privacy policy and App Store notes (`docs/`) are done. The Developer Program, App Attest and a real hosted deployment are not.
+
+### Phase 4 test on the phone
+
+Set an alarm for every day a few minutes ahead, pass it, and check the follow-up rings and the next morning rings without opening the app.
 
 ---
 
@@ -67,7 +80,7 @@ _Last updated: November 5, 2026_
 
 ---
 
-## Phase 4: Real morning alarms (next, ~1 day)
+## Phase 4: Real morning alarms ✅
 
 **Goal:** set it once ("weekdays at 7:00") and it works every morning without you opening the app the night before. After you pass, a follow-up check makes sure you didn't go back to bed.
 
@@ -127,7 +140,7 @@ It's stored so a crash or restart mid-morning resumes in the right place.
 
 ---
 
-## Phase 5: Accuracy, offline backup and history (1–2 days)
+## Phase 5: Accuracy, offline backup and history ✅
 
 **Goal:** trust the check. It should pass honest morning photos, catch cheats, and still work without the internet.
 
@@ -163,7 +176,7 @@ When OpenAI can't be reached (no Wi-Fi, an outage, credits gone) after a retry:
 
 ---
 
-## Phase 6: Polish and first-run setup (~1 day)
+## Phase 6: Polish and first-run setup ✅
 
 - **First-run setup:** permissions, then the API key, then the first proof (with a "take reference photos now" camera option), then a practice run, then the first alarm.
 - **App icon and sounds:** a real icon, and a louder custom alarm sound if AlarmKit's sound options allow it.
@@ -180,7 +193,7 @@ When OpenAI can't be reached (no Wi-Fi, an outage, credits gone) after a retry:
 
 ---
 
-## Phase 7 (optional): Sharing it with other people (2+ days)
+## Phase 7 (optional): Sharing it with other people ✅ (code and docs)
 
 Only needed if anyone else will use it.
 
@@ -197,7 +210,7 @@ Only needed if anyone else will use it.
 
 ## Open checks
 
-These need your iPhone and your OpenAI key. Do them before phase 4.
+These need your iPhone and your OpenAI key. Still open.
 
 | # | Check | Why it's open |
 |---|---|---|
@@ -206,6 +219,8 @@ These need your iPhone and your OpenAI key. Do them before phase 4.
 | 3 | A real Decisions API check: a pass, a fail and a bad key | Built from OpenAI's guide; refusal and error shapes aren't fully documented |
 | 4 | The live camera, front and back | The simulator has no camera |
 | 5 | The alarm rings with the ringer switch on silent | AlarmKit's main promise; simulator only |
+| 6 | The on-phone check tells a different place from the right one | In the simulator Vision's image comparison reports distance 0 for very different images, so the "same place" distances (`OfflineVerifier.sameDistance` / `differentDistance`) are untested and untuned |
+| 7 | A full morning: repeating mornings without opening the app, then the follow-up | Phase 4's done-when; only unit tested |
 
 ## Risks
 
