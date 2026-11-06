@@ -9,4 +9,14 @@ enum ActiveMission {
     static func resolve(id: String, in missions: [Mission]) -> Mission? {
         missions.first { $0.id.uuidString == id } ?? missions.first
     }
+
+    /// An alarm's own proof if it has one and it still exists; otherwise
+    /// the default proof, otherwise the oldest one. A deleted proof can't
+    /// leave an alarm with nothing to check against.
+    static func resolve(preferred: String?, fallback: String, in missions: [Mission]) -> Mission? {
+        if let preferred, let match = missions.first(where: { $0.id.uuidString == preferred }) {
+            return match
+        }
+        return resolve(id: fallback, in: missions)
+    }
 }

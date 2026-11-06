@@ -32,7 +32,9 @@ enum Challenge: String, CaseIterable, Codable {
         }
     }
 
-    static func random() -> Challenge {
-        allCases.randomElement() ?? .thumbsUp
+    /// A random challenge, never `previous` (so the follow-up check asks
+    /// for something different from the morning's).
+    static func random(excluding previous: Challenge? = nil) -> Challenge {
+        allCases.filter { $0 != previous }.randomElement() ?? .thumbsUp
     }
 }

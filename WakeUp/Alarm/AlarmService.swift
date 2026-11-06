@@ -3,45 +3,64 @@ import Foundation
 import Observation
 import SwiftUI
 
-/// Wraps AlarmKit. AlarmKit always shows a Stop button we can't remove, so
-/// instead of one alarm we schedule a *chain* (e.g. 7:00, 7:03, 7:06 ...)
-/// and only cancel the rest of it once the proof photo passes.
+/// Wraps AlarmKit. AlarmKit always shows a Stop button we can't remove, so a
+/// wake-up is a *chain* of alarms a few minutes apart (7:00, 7:03, 7:06 …)
+/// that only a passing proof photo cancels.
+///
+/// Mornings are scheduled ahead as fixed-date chains for the next few days
+/// (see `SchedulePlanner`), and topped up every time the app opens, after
+/// every pass, and by a background refresh. So the alarm rings on its own
+/// on the days the app isn't opened.
 @MainActor
 @Observable
 final class AlarmService {
     static let shared = AlarmService()
 
+    /// The developer test chain uses this alarm ID.
+    static let testAlarmID = UUID(uuidString: "00000000-0000-0000-0000-00000000DE57")!
+
     private(set) var authorization: AlarmManager.AuthorizationState
     private(set) var alarms: [Alarm] = []
+    private(set) var chains: [ScheduledChain] = []
     var lastError: String?
 
     private let manager = AlarmManager.shared
-    private let chainStore = ChainStore()
+    private let store = ScheduleStore()
+    private var isReconciling = false
+    private var needsAnotherPass = false
+    /// Slots being scheduled right now, so cleanup doesn't mistake them for strays.
+    private var inFlight = Set<UUID>()
+
+    private let learnedLimitKey = "alarmKit.learnedSlotLimit"
 
     private init() {
         authorization = manager.authorizationState
         alarms = (try? manager.alarms) ?? []
+        chains = store.chains
         Task { await observeAlarms() }
         Task { await observeAuthorization() }
     }
 
     // MARK: - State
 
-    /// IDs of the alarms in the current chain that AlarmKit still knows about.
-    var chainAlarms: [Alarm] {
-        let ids = Set(chainStore.ids)
+    func alarms(in chain: ScheduledChain) -> [Alarm] {
+        let ids = Set(chain.slotIDs)
         return alarms.filter { ids.contains($0.id) }
     }
 
-    /// True once the first alarm of the chain has gone off and the chain
-    /// hasn't been cleared by a passing proof yet.
-    var chainHasStarted: Bool {
-        guard let start = chainStore.start else { return false }
-        return start <= .now && !chainStore.ids.isEmpty
+    /// Chains whose first alarm has rung and that haven't run out.
+    func startedChains(now: Date = .now) -> [ScheduledChain] {
+        chains.filter { $0.hasStarted(at: now) && !$0.isExpired(at: now) }
     }
 
     var isRinging: Bool {
-        chainAlarms.contains { $0.state == .alerting }
+        alarms.contains { $0.state == .alerting }
+    }
+
+    /// How many alarms iOS accepted before it said no, once it has said so.
+    var learnedSlotLimit: Int? {
+        let value = UserDefaults.standard.integer(forKey: learnedLimitKey)
+        return value > 0 ? value : nil
     }
 
     // MARK: - Permission
@@ -54,64 +73,173 @@ final class AlarmService {
         }
     }
 
-    // MARK: - Scheduling
-
-    /// Schedules `count` alarms, `interval` seconds apart, starting at `start`.
-    /// Replaces any chain that was already scheduled.
-    func scheduleChain(startingAt start: Date, count: Int, interval: TimeInterval) async {
-        cancelChain()
-        if authorization != .authorized {
+    private func ensureAuthorized(prompt: Bool) async -> Bool {
+        if authorization == .notDetermined, prompt {
             await requestAuthorization()
-            guard authorization == .authorized else {
-                lastError = "Alarms aren't allowed. Turn them on in Settings > WakeUp."
-                return
-            }
         }
+        if authorization != .authorized {
+            if prompt { lastError = "Alarms aren't allowed. Turn them on in Settings > WakeUp." }
+            return false
+        }
+        return true
+    }
 
+    // MARK: - Keeping the schedule up to date
+
+    /// Saves the alarms (so the scheduler can read them without the
+    /// database) and brings AlarmKit in line with them.
+    func update(specs: [AlarmSpec]) async {
+        store.specs = specs
+        // Only ask for permission once there is an alarm that needs it.
+        await reconcile(prompt: specs.contains { $0.isEnabled })
+    }
+
+    /// Makes AlarmKit match the saved alarms: adds mornings that are
+    /// missing, cancels ones that no longer match, forgets old ones.
+    /// `prompt` is false in the background, where a permission dialog
+    /// can't appear.
+    func reconcile(now: Date = .now, prompt: Bool = false) async {
+        if isReconciling {
+            needsAnotherPass = true
+            return
+        }
+        isReconciling = true
+        defer { isReconciling = false }
+        repeat {
+            needsAnotherPass = false
+            await reconcileOnce(now: now, prompt: prompt)
+        } while needsAnotherPass
+    }
+
+    private func reconcileOnce(now: Date, prompt: Bool) async {
+        refresh()
+        guard await ensureAuthorized(prompt: prompt) else { return }
+
+        let plan = SchedulePlanner.plan(
+            specs: store.specs,
+            existing: store.chains,
+            now: now,
+            slotBudget: learnedSlotLimit
+        )
+        for chain in plan.cancel + plan.expire {
+            cancelSlots(of: chain)
+            store.remove(chainID: chain.id)
+        }
+        cancelStrays()
+        chains = store.chains
+
+        for planned in plan.create {
+            let result = await schedule(
+                alarmID: planned.alarmID, kind: .main, day: planned.day, start: planned.start,
+                count: planned.count, interval: planned.interval, signature: planned.signature
+            )
+            if result.hitLimit { break }
+        }
+        chains = store.chains
+        refresh()
+    }
+
+    /// Cancels AlarmKit alarms that belong to no chain (left over from an
+    /// older version or an interrupted schedule).
+    private func cancelStrays() {
+        let known = Set(store.chains.flatMap(\.slotIDs)).union(inFlight)
+        for alarm in (try? manager.alarms) ?? [] where !known.contains(alarm.id) {
+            try? manager.stop(id: alarm.id)
+            try? manager.cancel(id: alarm.id)
+        }
+    }
+
+    // MARK: - Chains
+
+    /// Schedules the "Still up?" chain after a pass.
+    func scheduleFollowUp(for spec: AlarmSpec, delay: TimeInterval, now: Date = .now) async {
+        guard await ensureAuthorized(prompt: false) else { return }
+        let start = now.addingTimeInterval(max(delay, 60))
+        _ = await schedule(
+            alarmID: spec.id, kind: .followUp, day: Calendar.current.startOfDay(for: now), start: start,
+            count: AlarmSpec.followUpChainLength, interval: max(spec.chainInterval, 120),
+            signature: SchedulePlanner.signature(of: spec)
+        )
+        chains = store.chains
+    }
+
+    /// A short chain for trying the alarm. Replaces the previous test chain.
+    func scheduleTestChain(startingAt start: Date, count: Int, interval: TimeInterval) async {
+        for chain in store.chains where chain.kind == .test { cancel(chain) }
+        guard await ensureAuthorized(prompt: true) else { return }
+        _ = await schedule(
+            alarmID: Self.testAlarmID, kind: .test, day: Calendar.current.startOfDay(for: start), start: start,
+            count: count, interval: interval, signature: "test"
+        )
+        chains = store.chains
+    }
+
+    private func schedule(
+        alarmID: UUID, kind: ScheduledChain.Kind, day: Date, start: Date,
+        count: Int, interval: TimeInterval, signature: String
+    ) async -> (chain: ScheduledChain?, hitLimit: Bool) {
         let chainID = UUID()
         var scheduled: [UUID] = []
+        var hitLimit = false
+        let planned = (0..<count).map { _ in UUID() }
+        inFlight.formUnion(planned)
+        defer { inFlight.subtract(planned) }
+
         do {
-            for index in 0..<count {
-                let id = UUID()
+            for (index, id) in planned.enumerated() {
                 let fireDate = start.addingTimeInterval(Double(index) * interval)
                 let configuration = AlarmManager.AlarmConfiguration<WakeAlarmMetadata>(
                     schedule: .fixed(fireDate),
-                    attributes: Self.attributes(chainID: chainID, index: index, count: count),
+                    attributes: Self.attributes(kind: kind, chainID: chainID, index: index, count: count),
                     secondaryIntent: ProveAwakeIntent(alarmID: id.uuidString),
                     sound: .default
                 )
                 _ = try await manager.schedule(id: id, configuration: configuration)
                 scheduled.append(id)
             }
-            chainStore.save(ids: scheduled, start: start)
             lastError = nil
         } catch AlarmManager.AlarmError.maximumLimitReached {
-            chainStore.save(ids: scheduled, start: start)
-            lastError = "iOS only allowed \(scheduled.count) of \(count) alarms."
+            hitLimit = true
+            let total = ((try? manager.alarms) ?? []).count
+            if total > 0 { UserDefaults.standard.set(total, forKey: learnedLimitKey) }
+            lastError = "iOS only allows \(total) alarms at once, so the later mornings aren't scheduled yet. Use shorter chains or fewer alarms."
         } catch {
-            chainStore.save(ids: scheduled, start: start)
             lastError = "Couldn't schedule alarm \(scheduled.count + 1): \(error.localizedDescription)"
         }
+
+        guard !scheduled.isEmpty else { return (nil, hitLimit) }
+        let chain = ScheduledChain(
+            id: chainID, alarmID: alarmID, kind: kind, day: day, start: start, interval: interval,
+            slotIDs: scheduled, timeZoneID: Calendar.current.timeZone.identifier, signature: signature
+        )
+        store.add(chain)
+        chains = store.chains
+        return (chain, hitLimit)
+    }
+
+    /// Stops anything ringing in the chain and cancels every alarm left.
+    func cancel(_ chain: ScheduledChain) {
+        cancelSlots(of: chain)
+        store.remove(chainID: chain.id)
+        chains = store.chains
         refresh()
     }
 
-    /// Stops anything ringing and cancels every remaining alarm in the chain.
-    func cancelChain() {
-        for id in chainStore.ids {
+    private func cancelSlots(of chain: ScheduledChain) {
+        for id in chain.slotIDs {
             try? manager.stop(id: id)
             try? manager.cancel(id: id)
         }
-        chainStore.clear()
-        refresh()
     }
 
-    /// Cancels every alarm this app has scheduled, chain or not.
+    /// Cancels every alarm this app has scheduled and forgets the chains.
     func cancelEverything() {
-        for alarm in alarms {
+        for alarm in (try? manager.alarms) ?? alarms {
             try? manager.stop(id: alarm.id)
             try? manager.cancel(id: alarm.id)
         }
-        chainStore.clear()
+        store.clear()
+        chains = []
         refresh()
     }
 
@@ -125,6 +253,7 @@ final class AlarmService {
     func refresh() {
         alarms = (try? manager.alarms) ?? alarms
         authorization = manager.authorizationState
+        chains = store.chains
     }
 
     // MARK: - Helpers
@@ -145,10 +274,16 @@ final class AlarmService {
         return nil
     }
 
-    private static func attributes(chainID: UUID, index: Int, count: Int) -> AlarmAttributes<WakeAlarmMetadata> {
-        let title: LocalizedStringResource = index == 0
-            ? "Time to prove you're up"
-            : "Still not up? (\(index + 1) of \(count))"
+    private static func attributes(
+        kind: ScheduledChain.Kind, chainID: UUID, index: Int, count: Int
+    ) -> AlarmAttributes<WakeAlarmMetadata> {
+        let title: LocalizedStringResource
+        switch (kind, index) {
+        case (.followUp, 0): title = "Still up? Prove it again"
+        case (.followUp, _): title = "Still up? (\(index + 1) of \(count))"
+        case (_, 0): title = "Time to prove you're up"
+        default: title = "Still not up? (\(index + 1) of \(count))"
+        }
         let proveButton = AlarmButton(
             text: "Prove I'm up",
             textColor: .white,

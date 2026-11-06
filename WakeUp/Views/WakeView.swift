@@ -11,9 +11,10 @@ struct WakeView: View {
     @AppStorage(ActiveMission.key) private var activeMissionID = ""
     @State private var showingCamera = false
     @State private var passed = false
+    @State private var passedOffline = false
 
     private var mission: Mission? {
-        ActiveMission.resolve(id: activeMissionID, in: missions)
+        ActiveMission.resolve(preferred: coordinator.activeSpec?.missionID, fallback: activeMissionID, in: missions)
     }
 
     private var canCheck: Bool {
@@ -24,14 +25,14 @@ struct WakeView: View {
         VStack(spacing: 28) {
             Spacer()
 
-            Text("Prove you're up")
+            Text(coordinator.isFollowUp ? "Still up?" : "Prove you're up")
                 .font(.largeTitle.bold())
 
             VStack(spacing: 12) {
                 Image(systemName: coordinator.challenge.symbol)
                     .font(.system(size: 64))
                     .foregroundStyle(.tint)
-                Text("Today's challenge")
+                Text(coordinator.isFollowUp ? "A different challenge this time" : "Today's challenge")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Text(coordinator.challenge.instruction)
@@ -52,6 +53,7 @@ struct WakeView: View {
                 if canCheck {
                     Button {
                         passed = false
+                        passedOffline = false
                         showingCamera = true
                     } label: {
                         Label("Take proof photo", systemImage: "camera.fill")
@@ -82,11 +84,16 @@ struct WakeView: View {
         }
         .padding(24)
         .fullScreenCover(isPresented: $showingCamera, onDismiss: {
-            if passed { coordinator.markPassed() }
+            if passed { coordinator.markPassed(offline: passedOffline) }
         }) {
             if let mission {
-                ProofCaptureView(mission: mission, challenge: coordinator.challenge, mode: .wake) { _ in
+                ProofCaptureView(
+                    mission: mission,
+                    challenge: coordinator.challenge,
+                    mode: coordinator.isFollowUp ? .followUp : .wake
+                ) { verdict in
                     passed = true
+                    passedOffline = verdict.method == .offline
                 }
             }
         }
@@ -133,7 +140,9 @@ struct WakeView: View {
     }
 
     private var remainingText: String {
-        let remaining = alarmService.chainAlarms.filter { $0.state == .scheduled }.count
+        let remaining = coordinator.activeChain.map { chain in
+            alarmService.alarms(in: chain).filter { $0.state == .scheduled }.count
+        } ?? 0
         switch remaining {
         case 0: return "This is the last alarm in the chain."
         case 1: return "1 more alarm will ring until you pass."
