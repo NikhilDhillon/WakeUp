@@ -3,7 +3,7 @@ import Testing
 @testable import WakeUp
 
 @Suite(.serialized)
-struct OpenAIVerifierTests {
+struct ResponsesVerifierTests {
     private let request = VerificationRequest(
         photo: Data([1, 2, 3]),
         referencePhotos: [Data([4]), Data([5]), Data([6])],
@@ -29,7 +29,7 @@ struct OpenAIVerifierTests {
     // MARK: Request body
 
     @Test func bodyHasInstructionsSchemaAndAllImages() throws {
-        let body = OpenAIVerifier.body(for: request, model: "gpt-6-luna")
+        let body = ResponsesVerifier.body(for: request, model: "gpt-6-luna")
         #expect(body["model"] as? String == "gpt-6-luna")
         #expect(body["instructions"] as? String == VerifierPrompt.instructions)
         #expect(body["store"] as? Bool == false)
@@ -60,19 +60,27 @@ struct OpenAIVerifierTests {
     }
 
     @Test func reasoningEffortOnlyForReasoningModels() {
-        let luna = OpenAIVerifier.body(for: request, model: "gpt-6-luna")
+        let luna = ResponsesVerifier.body(for: request, model: "gpt-6-luna")
         #expect((luna["reasoning"] as? [String: String])?["effort"] == "low")
-        let old = OpenAIVerifier.body(for: request, model: "gpt-4o-mini")
+        let old = ResponsesVerifier.body(for: request, model: "gpt-4o-mini")
         #expect(old["reasoning"] == nil)
     }
 
     // MARK: Parsing
 
     @Test func parsesVerdictAfterReasoningItem() throws {
-        let verdict = try OpenAIVerifier.parse(data: Self.successBody(), status: 200)
-        #expect(verdict.challengeCompleted)
-        #expect(verdict.confidence == 0.91)
+        let verdict = try ResponsesVerifier.parse(data: Self.successBody(), status: 200)
+        #expect(verdict.probabilities[.challengeCompleted] == 0.91)
+        #expect(verdict.reason == "You're in the washroom holding up 3 fingers.")
         #expect(verdict.passes(threshold: 0.7))
+    }
+
+    @Test func noAnswersBecomeLowProbabilities() throws {
+        let text = #"{"same_place":true,"person_present":false,"matches_description":true,"challenge_completed":true,"appears_awake":true,"looks_like_photo_of_screen_or_print":false,"confidence":0.8,"reason":"No one is in the photo."}"#
+        let verdict = try ResponsesVerifier.parse(data: Self.successBody(text: text), status: 200)
+        #expect(abs(verdict.confidence(.personPresent) - 0.2) < 0.0001)
+        #expect(abs(verdict.confidence(.screenOrPrint) - 0.8) < 0.0001)
+        #expect(verdict.problems(threshold: 0.7) == [ProofCheck.personPresent.problem])
     }
 
     @Test func refusalBecomesRefusedError() {
@@ -82,7 +90,7 @@ struct OpenAIVerifierTests {
         ]
         let data = try! JSONSerialization.data(withJSONObject: body)
         #expect(throws: VerifierError.refused("Can't help with that.")) {
-            try OpenAIVerifier.parse(data: data, status: 200)
+            try ResponsesVerifier.parse(data: data, status: 200)
         }
     }
 
@@ -90,73 +98,46 @@ struct OpenAIVerifierTests {
         let body: [String: Any] = ["status": "incomplete", "incomplete_details": ["reason": "max_output_tokens"], "output": []]
         let data = try! JSONSerialization.data(withJSONObject: body)
         #expect(throws: VerifierError.incomplete("max_output_tokens")) {
-            try OpenAIVerifier.parse(data: data, status: 200)
+            try ResponsesVerifier.parse(data: data, status: 200)
         }
     }
 
     @Test func httpErrorsMapToFriendlyErrors() {
         let error = Data(#"{"error":{"message":"You exceeded your current quota."}}"#.utf8)
-        #expect(throws: VerifierError.invalidAPIKey) { try OpenAIVerifier.parse(data: error, status: 401) }
+        #expect(throws: VerifierError.invalidAPIKey) { try ResponsesVerifier.parse(data: error, status: 401) }
         #expect(throws: VerifierError.rateLimited("You exceeded your current quota.")) {
-            try OpenAIVerifier.parse(data: error, status: 429)
+            try ResponsesVerifier.parse(data: error, status: 429)
         }
-        #expect(throws: VerifierError.server(503)) { try OpenAIVerifier.parse(data: error, status: 503) }
+        #expect(throws: VerifierError.server(503)) { try ResponsesVerifier.parse(data: error, status: 503) }
     }
 
     @Test func malformedVerdictTextIsUnreadable() {
         #expect(throws: VerifierError.unreadableResponse) {
-            try OpenAIVerifier.parse(data: Self.successBody(text: "not json"), status: 200)
+            try ResponsesVerifier.parse(data: Self.successBody(text: "not json"), status: 200)
         }
     }
 
     // MARK: Network
 
     @Test func missingKeyFailsBeforeAnyRequest() async {
-        let verifier = OpenAIVerifier(apiKey: nil, model: "gpt-6-luna")
+        let verifier = ResponsesVerifier(apiKey: nil, model: "gpt-6-luna")
         await #expect(throws: VerifierError.missingAPIKey) {
             try await verifier.verify(request)
         }
     }
 
     @Test func sendsAuthorizedPostAndReturnsVerdict() async throws {
-        StubURLProtocol.handler = { urlRequest in
+        StubURLProtocol.setHandler(for: "/v1/responses") { urlRequest in
             #expect(urlRequest.httpMethod == "POST")
             #expect(urlRequest.url?.absoluteString == "https://api.openai.com/v1/responses")
             #expect(urlRequest.value(forHTTPHeaderField: "Authorization") == "Bearer test-key")
             return (200, Self.successBody())
         }
-        defer { StubURLProtocol.handler = nil }
+        defer { StubURLProtocol.setHandler(for: "/v1/responses", nil) }
 
-        let verifier = OpenAIVerifier(apiKey: "test-key", model: "gpt-6-luna", session: StubURLProtocol.session())
+        let verifier = ResponsesVerifier(apiKey: "test-key", model: "gpt-6-luna", session: StubURLProtocol.session())
         let verdict = try await verifier.verify(request)
-        #expect(verdict.reason.contains("3 fingers"))
+        #expect(verdict.reason?.contains("3 fingers") == true)
     }
 }
 
-/// Answers URLSession requests from a closure instead of the network.
-final class StubURLProtocol: URLProtocol, @unchecked Sendable {
-    nonisolated(unsafe) static var handler: ((URLRequest) -> (Int, Data))?
-
-    static func session() -> URLSession {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [StubURLProtocol.self]
-        return URLSession(configuration: configuration)
-    }
-
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-    override func startLoading() {
-        guard let handler = Self.handler, let url = request.url else {
-            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
-            return
-        }
-        let (status, data) = handler(request)
-        let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: data)
-        client?.urlProtocolDidFinishLoading(self)
-    }
-
-    override func stopLoading() {}
-}

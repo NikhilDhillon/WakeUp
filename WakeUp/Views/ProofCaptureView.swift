@@ -223,7 +223,11 @@ struct ProofCaptureView: View {
             .font(.title2.bold())
             .foregroundStyle(passed ? .green : .red)
 
-            Text(verdict.reason)
+            if let reason = verdict.reason {
+                Text(reason)
+            } else if passed {
+                Text("Every check passed.")
+            }
 
             if !passed {
                 VStack(alignment: .leading, spacing: 4) {
@@ -234,7 +238,7 @@ struct ProofCaptureView: View {
                 }
             }
 
-            Text("AI confidence: \(Int((verdict.confidence * 100).rounded()))%")
+            Text("Weakest check: \(Int((verdict.overallConfidence * 100).rounded()))% sure")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 

@@ -1,8 +1,10 @@
 import Foundation
 
-/// Checks a proof photo with OpenAI's Responses API, asking for a reply
-/// that must match the `Verdict` JSON schema.
-struct OpenAIVerifier: WakeVerifier {
+/// Checks a proof photo with OpenAI's Responses API. Slower and pricier
+/// than the Decisions API, but the AI also writes a short reason. The
+/// model answers yes/no per check plus one overall confidence, which is
+/// turned into a probability per check.
+struct ResponsesVerifier: WakeVerifier {
     var apiKey: String?
     var model: String
     var endpoint = URL(string: "https://api.openai.com/v1/responses")!
@@ -10,21 +12,9 @@ struct OpenAIVerifier: WakeVerifier {
 
     func verify(_ request: VerificationRequest) async throws -> Verdict {
         guard let apiKey, !apiKey.isEmpty else { throw VerifierError.missingAPIKey }
-
-        var urlRequest = URLRequest(url: endpoint, timeoutInterval: 60)
-        urlRequest.httpMethod = "POST"
-        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: Self.body(for: request, model: model))
-
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await session.data(for: urlRequest)
-        } catch {
-            throw VerifierError.network(error.localizedDescription)
-        }
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let (data, status) = try await OpenAIHTTP.post(
+            Self.body(for: request, model: model), to: endpoint, apiKey: apiKey, session: session
+        )
         return try Self.parse(data: data, status: status)
     }
 
@@ -36,10 +26,10 @@ struct OpenAIVerifier: WakeVerifier {
         ]
         for (index, photo) in request.referencePhotos.enumerated() {
             content.append(["type": "input_text", "text": "Reference photo \(index + 1) of \(request.referencePhotos.count):"])
-            content.append(image(photo))
+            content.append(OpenAIHTTP.imagePart(photo))
         }
         content.append(["type": "input_text", "text": "New photo, taken just now with the in-app camera:"])
-        content.append(image(request.photo))
+        content.append(OpenAIHTTP.imagePart(request.photo))
 
         var body: [String: Any] = [
             "model": model,
@@ -68,30 +58,50 @@ struct OpenAIVerifier: WakeVerifier {
         ["gpt-5", "gpt-6", "o1", "o3", "o4"].contains { model.hasPrefix($0) }
     }
 
-    private static func image(_ data: Data) -> [String: Any] {
-        [
-            "type": "input_image",
-            "image_url": "data:image/jpeg;base64,\(data.base64EncodedString())",
-            "detail": "auto",
-        ]
-    }
-
     // MARK: Response
 
-    static func parse(data: Data, status: Int) throws -> Verdict {
-        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    /// The JSON the model is told to write.
+    struct Answer: Decodable {
+        var samePlace: Bool
+        var personPresent: Bool
+        var matchesDescription: Bool
+        var challengeCompleted: Bool
+        var appearsAwake: Bool
+        var looksLikePhotoOfScreenOrPrint: Bool
+        var confidence: Double
+        var reason: String
 
-        guard (200..<300).contains(status) else {
-            let error = json?["error"] as? [String: Any]
-            let message = error?["message"] as? String ?? "Unknown error."
-            switch status {
-            case 401: throw VerifierError.invalidAPIKey
-            case 429: throw VerifierError.rateLimited(message)
-            case 400..<500: throw VerifierError.badRequest(message)
-            default: throw VerifierError.server(status)
-            }
+        enum CodingKeys: String, CodingKey {
+            case samePlace = "same_place"
+            case personPresent = "person_present"
+            case matchesDescription = "matches_description"
+            case challengeCompleted = "challenge_completed"
+            case appearsAwake = "appears_awake"
+            case looksLikePhotoOfScreenOrPrint = "looks_like_photo_of_screen_or_print"
+            case confidence
+            case reason
         }
-        guard let json else { throw VerifierError.unreadableResponse }
+
+        /// A "yes" becomes `confidence`, a "no" becomes `1 - confidence`.
+        var verdict: Verdict {
+            let c = min(max(confidence, 0), 1)
+            func p(_ yes: Bool) -> Double { yes ? c : 1 - c }
+            return Verdict(
+                probabilities: [
+                    .samePlace: p(samePlace),
+                    .personPresent: p(personPresent),
+                    .matchesDescription: p(matchesDescription),
+                    .challengeCompleted: p(challengeCompleted),
+                    .appearsAwake: p(appearsAwake),
+                    .screenOrPrint: p(looksLikePhotoOfScreenOrPrint),
+                ],
+                reason: reason
+            )
+        }
+    }
+
+    static func parse(data: Data, status: Int) throws -> Verdict {
+        let json = try OpenAIHTTP.json(from: data, status: status)
 
         if json["status"] as? String == "incomplete" {
             let details = json["incomplete_details"] as? [String: Any]
@@ -106,9 +116,9 @@ struct OpenAIVerifier: WakeVerifier {
                 switch part["type"] as? String {
                 case "output_text":
                     guard let text = part["text"] as? String,
-                          let verdict = try? JSONDecoder().decode(Verdict.self, from: Data(text.utf8))
+                          let answer = try? JSONDecoder().decode(Answer.self, from: Data(text.utf8))
                     else { throw VerifierError.unreadableResponse }
-                    return verdict
+                    return answer.verdict
                 case "refusal":
                     throw VerifierError.refused(part["refusal"] as? String ?? "No reason given.")
                 default:

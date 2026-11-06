@@ -68,7 +68,12 @@ enum Verifiers {
             return MockVerifier(passes: mock == "pass")
         }
         #endif
-        return OpenAIVerifier(apiKey: AppSettings.apiKey, model: AppSettings.model)
+        switch AppSettings.checkMethod {
+        case .decisions:
+            return DecisionsVerifier(apiKey: AppSettings.apiKey)
+        case .responses:
+            return ResponsesVerifier(apiKey: AppSettings.apiKey, model: AppSettings.model)
+        }
     }
 }
 
@@ -80,16 +85,15 @@ struct MockVerifier: WakeVerifier {
     func verify(_ request: VerificationRequest) async throws -> Verdict {
         try await Task.sleep(for: .seconds(1.5))
         return Verdict(
-            samePlace: true,
-            personPresent: passes,
-            matchesDescription: passes,
-            challengeCompleted: passes,
-            appearsAwake: true,
-            looksLikePhotoOfScreenOrPrint: false,
-            confidence: passes ? 0.92 : 0.3,
-            reason: passes
-                ? "Mock check: looks like you're up."
-                : "Mock check: no one is in the photo."
+            probabilities: [
+                .samePlace: 0.95,
+                .personPresent: passes ? 0.97 : 0.08,
+                .matchesDescription: passes ? 0.91 : 0.2,
+                .challengeCompleted: passes ? 0.88 : 0.05,
+                .appearsAwake: 0.9,
+                .screenOrPrint: 0.03,
+            ],
+            reason: nil
         )
     }
 }

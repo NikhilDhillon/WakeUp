@@ -4,6 +4,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage(AppSettings.modelKey) private var model = AppSettings.defaultModel
     @AppStorage(AppSettings.strictnessKey) private var strictness = Strictness.normal.rawValue
+    @AppStorage(AppSettings.checkMethodKey) private var checkMethod = CheckMethod.decisions.rawValue
 
     @State private var hasKey = AppSettings.hasAPIKey
     @State private var keyDraft = ""
@@ -46,14 +47,26 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    TextField(AppSettings.defaultModel, text: $model)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(.body.monospaced())
+                    Picker("Check with", selection: $checkMethod) {
+                        ForEach(CheckMethod.allCases) { method in
+                            Text(method.title).tag(method.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    if checkMethod == CheckMethod.responses.rawValue {
+                        TextField(AppSettings.defaultModel, text: $model)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .font(.body.monospaced())
+                    }
                 } header: {
-                    Text("Model")
+                    Text("AI check")
                 } footer: {
-                    Text("Any OpenAI model that accepts images. Leave it as \(AppSettings.defaultModel) unless the checks are too slow or too inaccurate.")
+                    if checkMethod == CheckMethod.responses.rawValue {
+                        Text("The Responses API also writes a short reason, but is slower and costs more. Any OpenAI model that takes images works; \(AppSettings.defaultModel) is the cheapest.")
+                    } else {
+                        Text("The Decisions API returns how likely each check is, using \(DecisionsVerifier.model). It's the cheapest and fastest option, but doesn't write a reason.")
+                    }
                 }
 
                 Section {
@@ -66,7 +79,7 @@ struct SettingsView: View {
                 } header: {
                     Text("How strict the check is")
                 } footer: {
-                    Text("Every check must pass either way. Strictness sets how sure the AI must be overall: lenient 50%, normal 70%, strict 85%.")
+                    Text("How sure the AI must be about every check (right place, you in the photo, challenge done, awake, not a screen): lenient 50%, normal 70%, strict 85%.")
                 }
             }
             .navigationTitle("Settings")

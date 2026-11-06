@@ -3,25 +3,13 @@ import Testing
 @testable import WakeUp
 
 struct VerdictTests {
-    private func verdict(
-        samePlace: Bool = true,
-        personPresent: Bool = true,
-        matchesDescription: Bool = true,
-        challengeCompleted: Bool = true,
-        appearsAwake: Bool = true,
-        screen: Bool = false,
-        confidence: Double = 0.9
-    ) -> Verdict {
-        Verdict(
-            samePlace: samePlace,
-            personPresent: personPresent,
-            matchesDescription: matchesDescription,
-            challengeCompleted: challengeCompleted,
-            appearsAwake: appearsAwake,
-            looksLikePhotoOfScreenOrPrint: screen,
-            confidence: confidence,
-            reason: "test"
-        )
+    private func verdict(_ overrides: [ProofCheck: Double] = [:]) -> Verdict {
+        var probabilities: [ProofCheck: Double] = [
+            .samePlace: 0.95, .personPresent: 0.97, .matchesDescription: 0.9,
+            .challengeCompleted: 0.9, .appearsAwake: 0.92, .screenOrPrint: 0.02,
+        ]
+        probabilities.merge(overrides) { $1 }
+        return Verdict(probabilities: probabilities, reason: nil)
     }
 
     @Test func goodPhotoPassesAtEveryStrictness() {
@@ -30,33 +18,38 @@ struct VerdictTests {
         }
     }
 
-    @Test func confidenceBelowThresholdFails() {
-        let v = verdict(confidence: 0.6)
+    @Test func eachCheckMustReachTheThreshold() {
+        let v = verdict([.challengeCompleted: 0.6])
         #expect(v.passes(threshold: Strictness.lenient.threshold))
         #expect(!v.passes(threshold: Strictness.normal.threshold))
-        #expect(v.problems(threshold: 0.7) == ["The AI wasn't sure enough (60%, needs 70%)."])
+        #expect(v.problems(threshold: 0.7) == [ProofCheck.challengeCompleted.problem])
     }
 
-    @Test func screenPhotoFailsEvenWhenConfident() {
-        let v = verdict(screen: true, confidence: 0.99)
+    @Test func screenCheckIsInverted() {
+        // 30% chance it's a screen means 70% sure it isn't.
+        let v = verdict([.screenOrPrint: 0.3])
+        #expect(v.confidence(.screenOrPrint) == 0.7)
+        #expect(v.passes(threshold: 0.7))
+        #expect(!v.passes(threshold: 0.85))
+        #expect(verdict([.screenOrPrint: 0.9]).problems(threshold: 0.5) == [ProofCheck.screenOrPrint.problem])
+    }
+
+    @Test func missingAnswerNeverPasses() {
+        var v = verdict()
+        v.probabilities[.personPresent] = nil
+        #expect(v.confidence(.personPresent) == 0)
         #expect(!v.passes(threshold: 0.5))
-        #expect(v.problems(threshold: 0.5) == ["This looks like a photo of a screen or a printout."])
     }
 
-    @Test func listsEveryFailedCheck() {
-        let v = verdict(samePlace: false, personPresent: false, challengeCompleted: false)
-        #expect(v.problems(threshold: 0.7).count == 3)
+    @Test func listsEveryFailedCheckInOrder() {
+        let v = verdict([.samePlace: 0.1, .personPresent: 0.2, .challengeCompleted: 0.3])
+        #expect(v.problems(threshold: 0.7) == [
+            ProofCheck.samePlace.problem, ProofCheck.personPresent.problem, ProofCheck.challengeCompleted.problem,
+        ])
     }
 
-    @Test func decodesSnakeCaseJSON() throws {
-        let json = """
-        {"same_place":true,"person_present":true,"matches_description":false,
-         "challenge_completed":true,"appears_awake":true,
-         "looks_like_photo_of_screen_or_print":false,"confidence":0.8,"reason":"Close."}
-        """
-        let v = try JSONDecoder().decode(Verdict.self, from: Data(json.utf8))
-        #expect(v.matchesDescription == false)
-        #expect(v.confidence == 0.8)
-        #expect(v.reason == "Close.")
+    @Test func overallConfidenceIsTheWeakestCheck() {
+        #expect(verdict([.appearsAwake: 0.55]).overallConfidence == 0.55)
+        #expect(verdict([.screenOrPrint: 0.4]).overallConfidence == 0.6)
     }
 }
