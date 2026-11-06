@@ -1,3 +1,4 @@
+import SwiftData
 import SwiftUI
 
 @main
@@ -12,6 +13,7 @@ struct WakeUpApp: App {
                     WakeView()
                 }
         }
+        .modelContainer(for: [Mission.self, ReferencePhoto.self])
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 AlarmService.shared.refresh()
