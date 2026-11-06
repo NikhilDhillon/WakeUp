@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSAlarmKitUsageDescription</key>
+	<string>WakeUp sets alarms that keep ringing until you prove you're out of bed.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>WakeUp takes a live photo each morning to check that you're really up.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Pick reference photos of the place you'll prove you're up in.</string>
+</dict>
+</plist>
