@@ -6,8 +6,13 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A1000000000000000000A014 /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A1000000000000000000A013 /* AppIntents.framework */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		A1000000000000000000A001 /* WakeUp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WakeUp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1000000000000000000A013 /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
 		A1000000000000000000A012 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -24,6 +29,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1000000000000000000A014 /* AppIntents.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -35,8 +41,17 @@
 			children = (
 				A1000000000000000000A002 /* WakeUp */,
 				A1000000000000000000A011 /* Config */,
+				A1000000000000000000A015 /* Frameworks */,
 				A1000000000000000000A005 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		A1000000000000000000A015 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				A1000000000000000000A013 /* AppIntents.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 		A1000000000000000000A005 /* Products */ = {
