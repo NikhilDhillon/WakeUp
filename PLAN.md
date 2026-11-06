@@ -18,6 +18,7 @@ _Last updated: November 6, 2026_
 | 5 | Accuracy, offline backup and history | ✅ Built, unit tested; the photo evaluation needs your photos | — |
 | 6 | Polish and first-run setup | ✅ Built (no widget); needs a week of real mornings | — |
 | 7 | Optional: sharing it with other people | ✅ Code and docs in the repo; needs the paid program to ship | — |
+| R | Redesign: Next Up home, Bedside wake screen ([docs/REDESIGN.md](docs/REDESIGN.md)) | ✅ Built, unit tested, checked in the simulator; needs a real morning on the phone | — |
 
 **Everything from phase 3 on has only been tested in the simulator and with unit tests.** Run the phone checks in [Open checks](#open-checks) and the phase 4 morning test below before trusting it.
 
@@ -205,6 +206,12 @@ Only needed if anyone else will use it.
   - a clear in-app notice that photos are checked by OpenAI
   - review notes explaining the alarm chain
 - **Model choice per user:** the `WakeVerifier` protocol already allows another provider, or an on-phone model such as a small Jev or Gemma vision model for people who don't want photos leaving the phone.
+
+## Redesign: Next Up home and Bedside wake screen ✅ (built)
+
+The plan and mockups are in [docs/REDESIGN.md](docs/REDESIGN.md). All eight build steps are done: design tokens (`Theme.swift` and the colour sets), the pure logic with tests (`HomeStatus`, `AlarmDifficulty`, `HistoryMath.recentDays`, `ScheduledChain.ringPosition`, `SkipPolicy` captions), the home components, the new Home, difficulty presets in the editor and the white wake screen. No model or scheduling changes.
+
+Still to do on the phone: the redesign check in [docs/PHONE_TESTS.md](docs/PHONE_TESTS.md). In the simulator the new Home was checked in light and dark, on an iPhone 17 and an iPhone SE, at a large accessibility text size, and the wake screen, Skip chip and difficulty presets were driven by hand. VoiceOver and AX5 on the wake screen still need the phone. The challenge's line spacing is the system default, a little looser than the mockup.
 
 ---
 

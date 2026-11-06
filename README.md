@@ -18,6 +18,17 @@ The full plan for every phase, with open checks and risks, is in [PLAN.md](PLAN.
 | 5 | Accuracy, offline backup and history | Built and unit tested; `eval/` needs your photos |
 | 6 | Polish and first-run setup | Built (no widget) |
 | 7 | Optional: sharing it with other people | Proxy, in-app service option and docs done; shipping needs the paid developer program |
+| R | Redesign: Next Up home and Bedside wake screen | Built and unit tested; looked at in the simulator. Needs a real morning on the phone (see [docs/REDESIGN.md](docs/REDESIGN.md)) |
+
+## The home and wake screens
+
+**Alarms** (home) leads with one **Next Up** card: the alarm that rings next, a countdown, its days, its place, a **Skip** chip (greyed out, with the reason, when skipping isn't allowed) and a difficulty chip. Above it a single status pill says "Ready for tomorrow" or shows the worst problem with a button that fixes it ("+2" opens the full list). Below are the other alarms and a strip of the last seven mornings that opens History.
+
+In the alarm editor, **Difficulty** is Gentle, Firm or Relentless (Custom appears when the numbers match none of them, and **Customize** shows the individual settings).
+
+The **wake screen** is full white whatever the system appearance: "Ring 2 of 10", the challenge in huge black type, one **Open camera** button, and a small "Not yet" with the time of the next ring. Screen brightness goes to full while it's up and is put back after. Reference photos are behind **Show photos**.
+
+Debug builds accept the launch argument `-WakeUpSampleData` to fill an empty app with two places, three alarms and some history, so these screens can be checked in the simulator.
 
 ## How the alarm works
 
@@ -160,15 +171,22 @@ WakeUp/
     CameraModel.swift      Live camera (no photo library)
     CameraPreview.swift
   Settings/
+    HomeStatus.swift       What the status pill says; Next Up card logic
     KeychainStore.swift    API key storage
     AppSettings.swift      Model, strictness, key access
   Views/
-    HomeView.swift         Permission, proof, test chain, morning alarm, alarm list
+    Theme.swift            Colours (from Assets.xcassets), sizes and shared styles
+    HomeView.swift         Alarms screen: status pill, Next Up card, other alarms, week strip
+    StatusPill.swift       The pill and its details sheet
+    NextAlarmCard.swift    The Next Up card
+    AlarmRowCompact.swift  A row for each of the other alarms
+    DayDots.swift          Read-only weekday circles
+    WeekStrip.swift        Streak and the last seven mornings
     SettingsView.swift     API key, model, strictness
     ProofCaptureView.swift Camera, check, result
     MissionsView.swift     List of proofs; pick the one the alarm uses
     MissionEditorView.swift  Create or edit a proof
-    WakeView.swift         The proof screen
+    WakeView.swift         The Bedside wake screen
 Config/Info.plist          Permission messages (alarms, camera, photos)
 ```
 

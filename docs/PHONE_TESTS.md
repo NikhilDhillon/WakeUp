@@ -47,6 +47,16 @@ Set a real alarm for every day, 5 minutes from now. Follow-up after 5 minutes.
 - [ ] Change the alarm time to the next day's morning, **don't open the app** the next day, and let it ring. Do this two days in a row (set it for tomorrow and the day after). Confirm it rings both days without opening WakeUp in between.
 - [ ] Skip: tap **Skip Fri** (or the next day) on an alarm and confirm that day doesn't ring. Try a third skip within a week: it should be refused.
 
+## 4b. The redesigned screens (10 min)
+
+- [ ] **Home:** the pill under "Alarms" says "Ready for tomorrow" (or the right day). The Next Up card shows the alarm that rings next, its countdown, days and place.
+- [ ] **Skip:** the chip names the next morning ("Skip Monday"); tapping it moves the card to the next real ring and the chip becomes "Undo skip". With 2 skips already in that week it is greyed out and says why.
+- [ ] **Problems:** turn off camera access in iOS Settings; the pill changes to "Camera is blocked" with an **Open Settings** button. Put it back.
+- [ ] **Difficulty:** in the alarm editor Gentle, Firm and Relentless set the ring count, gap and follow-up; **Customize** shows the individual settings.
+- [ ] **Wake screen:** it is full white even in dark mode, shows "Ring 2 of 10" and the next ring time under "Not yet", and **Show photos** reveals the reference photos.
+- [ ] **Brightness:** the screen goes to full brightness on the wake screen. If you force-quit the app while it's up, brightness stays high until the phone locks (expected).
+- [ ] Largest Dynamic Type size and VoiceOver on Home and the wake screen: everything reachable, the Next Up card reads as one item with Skip, Edit and Turn off actions.
+
 ## 5. Odd situations
 
 - [ ] **Restart overnight:** restart the phone in the evening, don't open WakeUp, and confirm the morning alarm still rings.
