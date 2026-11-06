@@ -29,7 +29,7 @@ enum Strictness: String, CaseIterable, Identifiable {
 enum AppSettings {
     static let modelKey = "openAIModel"
     static let strictnessKey = "strictness"
-    static let defaultModel = "gpt-5-mini"
+    static let defaultModel = "gpt-6-luna"
 
     private static let keychain = KeychainStore()
     private static let apiKeyAccount = "openai-api-key"
