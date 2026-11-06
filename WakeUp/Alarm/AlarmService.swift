@@ -1,3 +1,4 @@
+import ActivityKit
 import AlarmKit
 import Foundation
 import Observation
@@ -131,7 +132,8 @@ final class AlarmService {
         for planned in plan.create {
             let result = await schedule(
                 alarmID: planned.alarmID, kind: .main, day: planned.day, start: planned.start,
-                count: planned.count, interval: planned.interval, signature: planned.signature
+                count: planned.count, interval: planned.interval, signature: planned.signature,
+                sound: planned.sound
             )
             if result.hitLimit { break }
         }
@@ -158,7 +160,7 @@ final class AlarmService {
         _ = await schedule(
             alarmID: spec.id, kind: .followUp, day: Calendar.current.startOfDay(for: now), start: start,
             count: AlarmSpec.followUpChainLength, interval: max(spec.chainInterval, 120),
-            signature: SchedulePlanner.signature(of: spec)
+            signature: SchedulePlanner.signature(of: spec), sound: spec.sound
         )
         chains = store.chains
     }
@@ -176,7 +178,7 @@ final class AlarmService {
 
     private func schedule(
         alarmID: UUID, kind: ScheduledChain.Kind, day: Date, start: Date,
-        count: Int, interval: TimeInterval, signature: String
+        count: Int, interval: TimeInterval, signature: String, sound: String = AlarmSound.standard.rawValue
     ) async -> (chain: ScheduledChain?, hitLimit: Bool) {
         let chainID = UUID()
         var scheduled: [UUID] = []
@@ -192,7 +194,7 @@ final class AlarmService {
                     schedule: .fixed(fireDate),
                     attributes: Self.attributes(kind: kind, chainID: chainID, index: index, count: count),
                     secondaryIntent: ProveAwakeIntent(alarmID: id.uuidString),
-                    sound: .default
+                    sound: Self.alertSound(named: sound)
                 )
                 _ = try await manager.schedule(id: id, configuration: configuration)
                 scheduled.append(id)
@@ -215,6 +217,11 @@ final class AlarmService {
         store.add(chain)
         chains = store.chains
         return (chain, hitLimit)
+    }
+
+    private static func alertSound(named raw: String) -> ActivityKit.AlertConfiguration.AlertSound {
+        guard let file = AlarmSound(rawValue: raw)?.fileName else { return .default }
+        return .named(file)
     }
 
     /// Stops anything ringing in the chain and cancels every alarm left.

@@ -19,6 +19,8 @@ struct AlarmSpec: Codable, Equatable, Identifiable, Sendable {
     var isEnabled: Bool
     /// Start-of-day dates the user chose to skip.
     var skippedDays: [Date]
+    /// `AlarmSound` raw value.
+    var sound: String = AlarmSound.standard.rawValue
 
     /// Alarms in the follow-up chain that rings after a pass.
     static let followUpChainLength = 4
@@ -76,6 +78,7 @@ struct PlannedChain: Equatable, Sendable {
     var interval: TimeInterval
     var timeZoneID: String
     var signature: String
+    var sound: String = AlarmSound.standard.rawValue
 }
 
 struct SchedulePlan: Equatable, Sendable {
@@ -141,7 +144,7 @@ enum SchedulePlanner {
     }
 
     static func signature(of spec: AlarmSpec, calendar: Calendar = .current) -> String {
-        "\(spec.hour):\(spec.minute)|\(spec.chainLength)|\(Int(spec.chainInterval))|\(calendar.timeZone.identifier)"
+        "\(spec.hour):\(spec.minute)|\(spec.chainLength)|\(Int(spec.chainInterval))|\(calendar.timeZone.identifier)|\(spec.sound)"
     }
 
     /// Compares what should be scheduled with what is, and says what to
@@ -169,7 +172,8 @@ enum SchedulePlanner {
                     count: spec.chainLength,
                     interval: spec.chainInterval,
                     timeZoneID: calendar.timeZone.identifier,
-                    signature: signature
+                    signature: signature,
+                    sound: spec.sound
                 ))
             }
         }
@@ -240,4 +244,46 @@ enum SkipPolicy {
 extension Set where Element == Int {
     static let everyDay: Set<Int> = Set(1...7)
     static let weekdays: Set<Int> = [2, 3, 4, 5, 6]
+}
+
+/// What an alarm sounds like.
+enum AlarmSound: String, CaseIterable, Identifiable, Sendable {
+    case standard
+    /// A louder, harsher beeping tone bundled with the app (`WakeAlarm.wav`).
+    case loud
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .standard: "Standard"
+        case .loud: "Loud beeps"
+        }
+    }
+
+    /// The file in the app bundle, or nil for the system alarm sound.
+    var fileName: String? {
+        switch self {
+        case .standard: nil
+        case .loud: "WakeAlarm.wav"
+        }
+    }
+}
+
+extension AlarmSpec {
+    // Alarms saved by an older build have no `sound`.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        hour = try c.decode(Int.self, forKey: .hour)
+        minute = try c.decode(Int.self, forKey: .minute)
+        weekdays = try c.decode(Set<Int>.self, forKey: .weekdays)
+        missionID = try c.decodeIfPresent(String.self, forKey: .missionID)
+        chainLength = try c.decode(Int.self, forKey: .chainLength)
+        chainInterval = try c.decode(TimeInterval.self, forKey: .chainInterval)
+        followUpDelay = try c.decode(TimeInterval.self, forKey: .followUpDelay)
+        isEnabled = try c.decode(Bool.self, forKey: .isEnabled)
+        skippedDays = try c.decode([Date].self, forKey: .skippedDays)
+        sound = try c.decodeIfPresent(String.self, forKey: .sound) ?? AlarmSound.standard.rawValue
+    }
 }

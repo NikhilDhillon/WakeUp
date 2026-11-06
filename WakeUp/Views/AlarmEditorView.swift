@@ -16,6 +16,7 @@ struct AlarmEditorView: View {
     @State private var chainLength = 10
     @State private var intervalMinutes = 3
     @State private var followUpMinutes = 12
+    @State private var sound = AlarmSound.standard.rawValue
     @State private var loaded = false
     @State private var confirmingDelete = false
 
@@ -53,6 +54,12 @@ struct AlarmEditorView: View {
             } footer: {
                 if !missionID.isEmpty, !missions.contains(where: { $0.id.uuidString == missionID }) {
                     Text("The proof this alarm used was deleted, so it uses your default proof until you pick another.")
+                }
+            }
+
+            Section("Sound") {
+                Picker("Alarm sound", selection: $sound) {
+                    ForEach(AlarmSound.allCases) { Text($0.title).tag($0.rawValue) }
                 }
             }
 
@@ -120,6 +127,7 @@ struct AlarmEditorView: View {
         chainLength = alarm.chainLength
         intervalMinutes = alarm.chainIntervalMinutes
         followUpMinutes = alarm.followUpMinutes
+        sound = alarm.soundRaw
     }
 
     private func save() {
@@ -131,6 +139,7 @@ struct AlarmEditorView: View {
         target.chainLength = chainLength
         target.chainIntervalMinutes = intervalMinutes
         target.followUpMinutes = followUpMinutes
+        target.soundRaw = sound
         if alarm == nil { context.insert(target) }
         dismiss()
     }

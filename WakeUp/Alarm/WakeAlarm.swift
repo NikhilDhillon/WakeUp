@@ -19,6 +19,7 @@ final class WakeAlarm {
     var chainIntervalMinutes: Int = 3
     var followUpMinutes: Int = 12
     var skippedDays: [Date] = []
+    var soundRaw: String = AlarmSound.standard.rawValue
     var createdAt: Date = Date()
 
     static let chainLengthRange = 1...10
@@ -47,7 +48,8 @@ final class WakeAlarm {
             chainInterval: Double(min(max(chainIntervalMinutes, Self.chainIntervalRange.lowerBound), Self.chainIntervalRange.upperBound)) * 60,
             followUpDelay: Double(max(followUpMinutes, 0)) * 60,
             isEnabled: isEnabled,
-            skippedDays: skippedDays
+            skippedDays: skippedDays,
+            sound: soundRaw
         )
     }
 
