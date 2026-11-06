@@ -1,11 +1,14 @@
+import SwiftData
 import SwiftUI
 
 /// The screen you land on from the ringing alarm.
-/// Phase 1: the camera and AI check aren't built yet, so there's a test
+/// The camera and AI check (phase 3) aren't built yet, so there's a test
 /// button that counts as passing.
 struct WakeView: View {
     @State private var coordinator = WakeCoordinator.shared
     @State private var alarmService = AlarmService.shared
+    @Query(sort: \Mission.createdAt) private var missions: [Mission]
+    @AppStorage(ActiveMission.key) private var activeMissionID = ""
 
     var body: some View {
         VStack(spacing: 28) {
@@ -25,6 +28,8 @@ struct WakeView: View {
                     .font(.title2.weight(.semibold))
                     .multilineTextAlignment(.center)
             }
+
+            missionCard
 
             Text(remainingText)
                 .font(.footnote)
@@ -53,6 +58,39 @@ struct WakeView: View {
         .padding(24)
     }
 
+    @ViewBuilder
+    private var missionCard: some View {
+        if let mission = ActiveMission.resolve(id: activeMissionID, in: missions) {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Go to: \(mission.name)", systemImage: "location.fill")
+                    .font(.headline)
+                Text(mission.proofDescription)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(mission.orderedPhotos) { photo in
+                            if let image = UIImage(data: photo.jpegData) {
+                                Image(uiImage: image)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 64, height: 64)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                        }
+                    }
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 14))
+        } else {
+            Label("No proof set up yet. Add one from the home screen.", systemImage: "exclamationmark.circle")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private var remainingText: String {
         let remaining = alarmService.chainAlarms.filter { $0.state == .scheduled }.count
         switch remaining {
@@ -65,4 +103,5 @@ struct WakeView: View {
 
 #Preview {
     WakeView()
+        .modelContainer(for: [Mission.self, ReferencePhoto.self], inMemory: true)
 }

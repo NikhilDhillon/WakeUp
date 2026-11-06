@@ -1,10 +1,13 @@
 import AlarmKit
+import SwiftData
 import SwiftUI
 
-/// Phase 1 screen: everything needed to test AlarmKit on a real phone.
+/// Home: your proof, the alarm test tools, and the morning alarm.
 struct HomeView: View {
     @State private var alarmService = AlarmService.shared
     @State private var coordinator = WakeCoordinator.shared
+    @Query(sort: \Mission.createdAt) private var missions: [Mission]
+    @AppStorage(ActiveMission.key) private var activeMissionID = ""
     @State private var testCount = 3
     @State private var testIntervalMinutes = 1
     @State private var morningTime = Calendar.current.date(from: DateComponents(hour: 7, minute: 0)) ?? .now
@@ -15,6 +18,7 @@ struct HomeView: View {
         NavigationStack {
             Form {
                 permissionSection
+                proofSection
                 if let lastPassed = coordinator.lastPassed {
                     Section("Last proof") {
                         Label {
@@ -60,6 +64,39 @@ struct HomeView: View {
         }
     }
 
+    private var activeMission: Mission? {
+        ActiveMission.resolve(id: activeMissionID, in: missions)
+    }
+
+    private var proofSection: some View {
+        Section {
+            NavigationLink {
+                MissionsView()
+            } label: {
+                if let mission = activeMission {
+                    HStack(spacing: 12) {
+                        MissionThumbnail(mission: mission, size: 44)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(mission.name).font(.headline)
+                            Text(mission.proofDescription)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                    }
+                } else {
+                    Label("Set up your proof", systemImage: "camera.viewfinder")
+                }
+            }
+        } header: {
+            Text("Proof")
+        } footer: {
+            if activeMission == nil {
+                Text("Describe what proves you're up and add a few photos of the place.")
+            }
+        }
+    }
+
     private var testSection: some View {
         Section {
             Stepper("Alarms in chain: \(testCount)", value: $testCount, in: 1...10)
@@ -97,7 +134,11 @@ struct HomeView: View {
         } header: {
             Text("Morning alarm")
         } footer: {
-            Text("Schedules one chain for the next time the clock shows this time.")
+            if activeMission == nil {
+                Text("Set up your proof first. Until the camera check is built, the alarm accepts a test pass.")
+            } else {
+                Text("Schedules one chain for the next time the clock shows this time.")
+            }
         }
     }
 
@@ -147,4 +188,5 @@ struct HomeView: View {
 
 #Preview {
     HomeView()
+        .modelContainer(for: [Mission.self, ReferencePhoto.self], inMemory: true)
 }
