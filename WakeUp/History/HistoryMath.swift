@@ -20,7 +20,48 @@ struct MorningSummary: Equatable, Identifiable, Sendable {
     var id: Date { day }
 }
 
+/// How one of the last few days looks in the Mornings strip.
+enum DayMark: Equatable, Sendable {
+    /// A main check passed.
+    case passed
+    /// Today, with an alarm, still to come (or not yet proven).
+    case upcoming
+    /// An alarm day in the past with no pass.
+    case missed
+    /// No alarm that day, a skip, or before the app had any alarms.
+    case none
+}
+
 enum HistoryMath {
+    /// The last `count` days ending today, oldest first, each with its mark.
+    /// `alarmWeekdays` is the union of the enabled alarms' days; an empty set
+    /// means no alarm is on, so every day is `.none`. Days before
+    /// `trackingSince` (the oldest alarm) are `.none` too.
+    static func recentDays(
+        passDays: Set<Date>,
+        alarmWeekdays: Set<Int>,
+        skippedDays: Set<Date>,
+        trackingSince: Date? = nil,
+        now: Date,
+        count: Int = 7,
+        calendar: Calendar = .current
+    ) -> [(day: Date, mark: DayMark)] {
+        let passes = Set(passDays.map { calendar.startOfDay(for: $0) })
+        let skips = Set(skippedDays.map { calendar.startOfDay(for: $0) })
+        let today = calendar.startOfDay(for: now)
+        let first = trackingSince.map { calendar.startOfDay(for: $0) }
+
+        return (0..<max(count, 0)).reversed().compactMap { back in
+            guard let day = calendar.date(byAdding: .day, value: -back, to: today) else { return nil }
+            let isAlarmDay = alarmWeekdays.contains(calendar.component(.weekday, from: day))
+                && !skips.contains(day)
+                && (first.map { day >= $0 } ?? true)
+            guard isAlarmDay else { return (day, .none) }
+            if passes.contains(day) { return (day, .passed) }
+            return (day, day == today ? .upcoming : .missed)
+        }
+    }
+
     /// One summary per day that had attempts, newest first.
     static func summaries(of attempts: [AttemptInfo], calendar: Calendar = .current) -> [MorningSummary] {
         Dictionary(grouping: attempts) { calendar.startOfDay(for: $0.date) }

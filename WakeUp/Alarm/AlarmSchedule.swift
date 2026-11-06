@@ -64,6 +64,20 @@ struct ScheduledChain: Codable, Equatable, Identifiable, Sendable {
 
     func hasStarted(at now: Date) -> Bool { start <= now }
 
+    /// Which ring is current (1-based) and when the next one comes, from the
+    /// chain's start and interval. `next` is nil on the last ring. Before the
+    /// chain starts, the current ring is the first.
+    func ringPosition(at now: Date) -> (current: Int, total: Int, next: Date?) {
+        let total = max(slotIDs.count, 1)
+        guard interval > 0, now >= start else {
+            return (1, total, total > 1 ? start.addingTimeInterval(max(interval, 0)) : nil)
+        }
+        let elapsed = Int((now.timeIntervalSince(start) / interval).rounded(.down))
+        let current = min(max(elapsed + 1, 1), total)
+        let next = current < total ? start.addingTimeInterval(interval * Double(current)) : nil
+        return (current, total, next)
+    }
+
     func isExpired(at now: Date) -> Bool {
         lastRing.addingTimeInterval(Self.owedGrace) < now
     }
@@ -238,6 +252,34 @@ enum SkipPolicy {
             if inWindow + 1 > maxPerWeek { return .weekLimit }
         }
         return .allowed
+    }
+
+    /// The most other skipped days that share any 7-day window with `day`.
+    /// This is what "N skips used this week" reports.
+    static func skipsUsed(near day: Date, skipped: [Date], calendar: Calendar = .current) -> Int {
+        let target = calendar.startOfDay(for: day)
+        let others = skipped.map { calendar.startOfDay(for: $0) }.filter { $0 != target }
+        var most = 0
+        for back in 0..<7 {
+            guard let windowStart = calendar.date(byAdding: .day, value: -back, to: target),
+                  let windowEnd = calendar.date(byAdding: .day, value: 7, to: windowStart)
+            else { continue }
+            most = max(most, others.filter { $0 >= windowStart && $0 < windowEnd }.count)
+        }
+        return most
+    }
+
+    /// Why the Skip chip is greyed out, or nil when skipping is allowed.
+    static func unavailableReason(day: Date, skipped: [Date], now: Date, calendar: Calendar = .current) -> String? {
+        switch check(day: day, skipped: skipped, now: now, calendar: calendar) {
+        case .allowed:
+            return nil
+        case .tooSoon:
+            return "Skip by the night before"
+        case .weekLimit:
+            let used = max(skipsUsed(near: day, skipped: skipped, calendar: calendar), maxPerWeek)
+            return "\(used) skips used this week"
+        }
     }
 }
 
