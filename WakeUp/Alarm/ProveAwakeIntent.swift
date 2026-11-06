@@ -27,6 +27,7 @@ struct ProveAwakeIntent: LiveActivityIntent {
             if let id {
                 AlarmService.shared.silence(alarmID: id)
             }
+            WakeCoordinator.shared.proofRequested()
         }
         return .result()
     }

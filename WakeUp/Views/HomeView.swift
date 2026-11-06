@@ -4,6 +4,7 @@ import SwiftUI
 /// Phase 1 screen: everything needed to test AlarmKit on a real phone.
 struct HomeView: View {
     @State private var alarmService = AlarmService.shared
+    @State private var coordinator = WakeCoordinator.shared
     @State private var testCount = 3
     @State private var testIntervalMinutes = 1
     @State private var morningTime = Calendar.current.date(from: DateComponents(hour: 7, minute: 0)) ?? .now
@@ -14,6 +15,15 @@ struct HomeView: View {
         NavigationStack {
             Form {
                 permissionSection
+                if let lastPassed = coordinator.lastPassed {
+                    Section("Last proof") {
+                        Label {
+                            Text(lastPassed, format: .dateTime.weekday(.wide).hour().minute())
+                        } icon: {
+                            Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                        }
+                    }
+                }
                 testSection
                 morningSection
                 scheduledSection
