@@ -76,7 +76,11 @@ enum Verifiers {
         #if DEBUG
         if UserDefaults.standard.string(forKey: "WakeUpMockVerdict") != nil { return true }
         #endif
-        return AppSettings.hasAPIKey
+        switch AppSettings.checkMethod {
+        case .decisions, .responses: return AppSettings.hasAPIKey
+        case .service: return AppSettings.serviceURL != nil
+        case .onPhone: return true
+        }
     }
 
     /// The verifier the app uses right now.
@@ -94,6 +98,14 @@ enum Verifiers {
             primary = DecisionsVerifier(apiKey: AppSettings.apiKey)
         case .responses:
             primary = ResponsesVerifier(apiKey: AppSettings.apiKey, model: AppSettings.model)
+        case .service:
+            guard let base = AppSettings.serviceURL else { return OfflineVerifier() }
+            primary = DecisionsVerifier(
+                apiKey: AppSettings.deviceToken,
+                endpoint: base.appending(path: "v1/decisions")
+            )
+        case .onPhone:
+            return OfflineVerifier()
         }
         guard AppSettings.offlineBackupEnabled else { return primary }
         return FallbackVerifier(primary: primary, fallback: OfflineVerifier())

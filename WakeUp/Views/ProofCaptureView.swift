@@ -24,6 +24,7 @@ struct ProofCaptureView: View {
     @State private var camera = CameraModel()
     @State private var stage: Stage = .camera
     @State private var cameraError: String?
+    @State private var noticePhoto: Data?
     #if targetEnvironment(simulator)
     @State private var simulatorPick: PhotosPickerItem?
     #endif
@@ -47,6 +48,19 @@ struct ProofCaptureView: View {
         .task { await camera.start() }
         .onDisappear { camera.stop() }
         .preferredColorScheme(.dark)
+        .alert("Send this photo to be checked?", isPresented: Binding(
+            get: { noticePhoto != nil },
+            set: { if !$0 { noticePhoto = nil } }
+        )) {
+            Button("Send and check") {
+                AppSettings.hasAcceptedPhotoNotice = true
+                if let photo = noticePhoto { Task { await check(photo) } }
+                noticePhoto = nil
+            }
+            Button("Cancel", role: .cancel) { noticePhoto = nil }
+        } message: {
+            Text("To check you're up, WakeUp sends this photo and your reference photos to OpenAI (or the service set in Settings). WakeUp doesn't keep the photo. You can choose the on-phone check in Settings instead, which sends nothing.")
+        }
     }
 
     // MARK: Layout
@@ -62,7 +76,7 @@ struct ProofCaptureView: View {
                     Button("Retake") { stage = .camera }
                         .buttonStyle(.bordered)
                     Button {
-                        Task { await check(photo) }
+                        requestCheck(photo)
                     } label: {
                         Label("Check photo", systemImage: "sparkles")
                     }
@@ -89,7 +103,7 @@ struct ProofCaptureView: View {
                     HStack(spacing: 16) {
                         Button("Retake") { stage = .camera }
                             .buttonStyle(.bordered)
-                        Button("Try again") { Task { await check(photo) } }
+                        Button("Try again") { requestCheck(photo) }
                             .buttonStyle(.borderedProminent)
                     }
                 }
@@ -321,6 +335,15 @@ struct ProofCaptureView: View {
         if !passed { WakeCoordinator.shared.proofFailed() }
     }
 
+    /// Asks once, before the first photo leaves the phone.
+    private func requestCheck(_ photo: Data) {
+        if AppSettings.needsPhotoNotice {
+            noticePhoto = photo
+        } else {
+            Task { await check(photo) }
+        }
+    }
+
     private func check(_ photo: Data) async {
         stage = .checking(photo)
         guard let small = ImageResizer.jpegData(from: photo) else {
@@ -340,6 +363,9 @@ struct ProofCaptureView: View {
             let verdict = try await Verifiers.current().verify(request)
             let seconds = started.duration(to: clock.now).seconds
             record(verdict, seconds: seconds, small: small)
+            AccessibilityNotification.Announcement(
+                verdict.passes(using: thresholds) ? "Check passed" : "Check not passed"
+            ).post()
             stage = .result(photo, verdict)
         } catch {
             stage = .failed(photo, error.localizedDescription)
