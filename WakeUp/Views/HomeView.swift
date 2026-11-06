@@ -23,6 +23,12 @@ struct HomeView: View {
     /// Ticks every minute so "next alarm" stays right while the app is open.
     @State private var now = Date.now
     @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+    /// The alarm the card stays on after a switch is flipped. Without it,
+    /// turning the card's alarm off swaps in the next alarm (still on) and
+    /// turning another on pulls it up into the card, so the switch looks
+    /// like it did nothing. Let go the next time Home is shown fresh.
+    @State private var heldCardID: UUID?
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage(AppSettings.setupCompletedKey) private var setupCompleted = false
 
     var body: some View {
@@ -37,14 +43,15 @@ struct HomeView: View {
                     .plainRow(top: 4)
                 }
 
-                if let pick, let alarm = alarms.first(where: { $0.id == pick.alarmID }) {
+                if let cardPick, let alarm = alarms.first(where: { $0.id == cardPick.alarmID }) {
                     NextAlarmCard(
                         alarm: alarm,
                         mission: mission(for: alarm),
-                        ring: pick.ring,
+                        ring: cardPick.ring,
                         onEdit: { editing = .existing(alarm) },
                         onOpenPlace: { showingPlaces = true },
-                        onToggleSkip: { toggleSkip(alarm) }
+                        onToggleSkip: { toggleSkip(alarm) },
+                        willToggle: holdCard
                     )
                     .plainRow(top: 6, bottom: 8)
                 } else {
@@ -62,7 +69,8 @@ struct HomeView: View {
                         AlarmRowCompact(
                             alarm: alarm,
                             placeName: namedPlace(for: alarm)?.name,
-                            onEdit: { editing = .existing(alarm) }
+                            onEdit: { editing = .existing(alarm) },
+                            willToggle: holdCard
                         )
                         .plainRow()
                     }
@@ -83,7 +91,10 @@ struct HomeView: View {
             .scrollContentBackground(.hidden)
             .background(Theme.ground)
             .navigationTitle("Alarms")
-            .refreshable { await syncAlarms() }
+            .refreshable {
+                heldCardID = nil
+                await syncAlarms()
+            }
             .navigationDestination(isPresented: $showingPlaces) { MissionsView() }
             .navigationDestination(isPresented: $showingHistory) { HistoryView() }
             .toolbar {
@@ -124,7 +135,7 @@ struct HomeView: View {
                 lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
             }
             .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { now = $0 }
-            .sheet(item: $editing) { target in
+            .sheet(item: $editing, onDismiss: { heldCardID = nil }) { target in
                 NavigationStack {
                     switch target {
                     case .new:
@@ -142,6 +153,10 @@ struct HomeView: View {
             // Keep AlarmKit in step with the alarms whenever one changes.
             .onChange(of: alarms.map(\.spec)) { _, _ in
                 Task { await syncAlarms() }
+            }
+            .onChange(of: alarms.count) { _, _ in heldCardID = nil }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { heldCardID = nil }
             }
             .task {
                 #if DEBUG
@@ -164,10 +179,19 @@ struct HomeView: View {
 
     private var specs: [AlarmSpec] { alarms.map(\.spec) }
 
+    /// The alarm that really rings next (for the status pill).
     private var pick: NextUp.Pick? { NextUp.pick(specs: specs, now: now) }
 
+    /// The alarm the card shows: the next one, unless a switch flip is holding it.
+    private var cardPick: NextUp.Pick? { NextUp.pick(specs: specs, now: now, holding: heldCardID) }
+
     private var otherAlarms: [WakeAlarm] {
-        alarms.filter { $0.id != pick?.alarmID }
+        alarms.filter { $0.id != cardPick?.alarmID }
+    }
+
+    /// Keeps the card on whatever it shows now while a switch is flipped.
+    private func holdCard() {
+        if heldCardID == nil { heldCardID = cardPick?.alarmID }
     }
 
     private var status: HomeStatus? {

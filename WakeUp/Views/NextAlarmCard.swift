@@ -11,6 +11,8 @@ struct NextAlarmCard: View {
     var onEdit: () -> Void
     var onOpenPlace: () -> Void
     var onToggleSkip: () -> Void
+    /// Called just before the on/off switch changes the alarm.
+    var willToggle: () -> Void = {}
 
     var body: some View {
         // The countdown ticks once a minute.
@@ -52,7 +54,10 @@ struct NextAlarmCard: View {
         .accessibilityLabel(spokenSummary(now: now))
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(named: "Edit alarm", onEdit)
-        .accessibilityAction(named: alarm.isEnabled ? "Turn off" : "Turn on") { alarm.isEnabled.toggle() }
+        .accessibilityAction(named: alarm.isEnabled ? "Turn off" : "Turn on") {
+            willToggle()
+            alarm.isEnabled.toggle()
+        }
         .accessibilityAction(named: "Open place", onOpenPlace)
         .modifier(SkipActionModifier(chip: chip, perform: onToggleSkip))
     }
@@ -66,7 +71,10 @@ struct NextAlarmCard: View {
                 .tracking(0.6)
                 .foregroundStyle(ring == nil ? Theme.inkSecondary : Theme.accentText)
             Spacer()
-            Toggle("Alarm on", isOn: $alarm.isEnabled)
+            Toggle("Alarm on", isOn: Binding(
+                get: { alarm.isEnabled },
+                set: { willToggle(); alarm.isEnabled = $0 }
+            ))
                 .labelsHidden()
                 .tint(.accentColor)
         }

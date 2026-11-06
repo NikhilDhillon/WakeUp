@@ -148,7 +148,12 @@ enum NextUp {
         var isOff: Bool { ring == nil }
     }
 
-    static func pick(specs: [AlarmSpec], now: Date, calendar: Calendar = .current) -> Pick? {
+    /// `holding` keeps the card on that alarm (if it still exists) whatever
+    /// its ring, so flipping a switch doesn't swap the card under the finger.
+    static func pick(specs: [AlarmSpec], now: Date, holding: UUID? = nil, calendar: Calendar = .current) -> Pick? {
+        if let holding, let held = specs.first(where: { $0.id == holding }) {
+            return Pick(alarmID: held.id, ring: SchedulePlanner.nextRing(of: held, after: now, calendar: calendar))
+        }
         let rings = specs.compactMap { spec -> (UUID, Date)? in
             SchedulePlanner.nextRing(of: spec, after: now, calendar: calendar).map { (spec.id, $0) }
         }

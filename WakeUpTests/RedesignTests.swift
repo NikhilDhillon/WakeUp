@@ -376,6 +376,29 @@ struct NextUpTests {
         #expect(pick?.isOff == true)
     }
 
+    @Test func heldAlarmStaysOnTheCardWhenTurnedOff() {
+        // The card's alarm is switched off: the card keeps it, greyed, instead
+        // of swapping in the next alarm (whose switch is still on).
+        let turnedOff = spec(hour: 5, weekdays: .everyDay, enabled: false)
+        let other = spec(hour: 8, weekdays: .everyDay)
+        let pick = NextUp.pick(specs: [turnedOff, other], now: now, holding: turnedOff.id, calendar: calendar())
+        #expect(pick?.alarmID == turnedOff.id)
+        #expect(pick?.isOff == true)
+    }
+
+    @Test func heldAlarmStaysWhenAnEarlierOneIsTurnedOn() {
+        let shown = spec(hour: 8, weekdays: .everyDay)
+        let turnedOn = spec(hour: 5, weekdays: .everyDay)
+        let pick = NextUp.pick(specs: [shown, turnedOn], now: now, holding: shown.id, calendar: calendar())
+        #expect(pick?.alarmID == shown.id)
+        #expect(pick?.ring == date(2026, 11, 7, 8, 45))
+    }
+
+    @Test func heldAlarmThatWasDeletedFallsBackToTheNextRing() {
+        let on = spec(hour: 8, weekdays: .everyDay)
+        #expect(NextUp.pick(specs: [on], now: now, holding: UUID(), calendar: calendar())?.alarmID == on.id)
+    }
+
     @Test func noAlarmsNoPick() {
         #expect(NextUp.pick(specs: [], now: now, calendar: calendar()) == nil)
     }

@@ -6,6 +6,8 @@ struct AlarmRowCompact: View {
     /// The proof's name, or nil for "default place".
     var placeName: String?
     var onEdit: () -> Void
+    /// Called just before the on/off switch changes the alarm.
+    var willToggle: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 12) {
@@ -22,7 +24,10 @@ struct AlarmRowCompact: View {
             }
             .buttonStyle(.plain)
 
-            Toggle("Alarm on", isOn: $alarm.isEnabled)
+            Toggle("Alarm on", isOn: Binding(
+                get: { alarm.isEnabled },
+                set: { willToggle(); alarm.isEnabled = $0 }
+            ))
                 .labelsHidden()
                 .tint(.accentColor)
         }
