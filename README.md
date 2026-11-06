@@ -11,7 +11,7 @@ You describe what "up" looks like (for example, *me sitting in the washroom with
 | 0 | Xcode project, signing | Done |
 | 1 | AlarmKit alarm chain and "Prove I'm up" button | Built and tested in the simulator; the "Prove I'm up" button still needs testing on a real iPhone |
 | 2 | Proofs: description and reference photos | Done, tested in the simulator |
-| 3 | Live camera and the OpenAI check | Built; unit tested; flow tested in the simulator with a mock verdict. Needs a real run with your key on the phone |
+| 3 | Live camera and the OpenAI check (Decisions API) | Built; unit tested; flow tested in the simulator with a mock verdict. Needs a real run with your key on the phone |
 | 4 | Full morning flow and follow-up check | Not started |
 | 5 | Tuning with test photos, offline fallback, history | Not started |
 
@@ -39,19 +39,29 @@ Tested in the simulator: the editor won't save until all three parts are there a
 
 ## The AI check (phase 3)
 
-On the wake screen, **Take proof photo** opens a camera that can only take a new photo (front camera by default, with a flip button). The photo, your reference photos, your description and the day's challenge go to OpenAI's Responses API, which must answer in a fixed JSON format:
+On the wake screen, **Take proof photo** opens a camera that can only take a new photo (front camera by default, with a flip button). The photo, your reference photos, your description and the day's challenge go to OpenAI, which judges six checks:
 
-```
-same_place, person_present, matches_description, challenge_completed,
-appears_awake, looks_like_photo_of_screen_or_print, confidence (0-1), reason
-```
+| Check | Pass when |
+|---|---|
+| `same_place` | it's the place in your reference photos |
+| `person_present` | you're in the photo |
+| `matches_description` | it shows what your description says |
+| `challenge_completed` | you're doing today's challenge |
+| `appears_awake` | you look up: eyes open, upright, not in bed |
+| `looks_like_photo_of_screen_or_print` | this one must be **unlikely** |
 
-The app, not the AI, decides pass or fail: every yes/no must be right and confidence must reach your strictness level (lenient 50%, normal 70%, strict 85%). A pass stops the chain; a fail lists what to fix.
+The app, not the AI, decides pass or fail: **every** check must reach your strictness level (lenient 50%, normal 70%, strict 85%). A pass stops the chain; a fail lists the checks that missed.
 
-- **Settings** (gear on the home screen): your OpenAI API key (saved in the Keychain on this phone only), the model, and strictness.
-- **Default model:** `gpt-6-luna`, the cheapest current OpenAI model that takes images, sent with low reasoning effort to keep it quick. Try `gpt-6.1-terra` if it's too inaccurate.
-- **Practice:** open a proof and tap **Practice with this proof** to see what the AI says without touching any alarms.
-- **No escape hatch while it works:** if there's no proof or no API key, the wake screen says so and offers **Stop alarms without proof**, so a setup problem can't trap you.
+### Which OpenAI API
+
+Settings > **AI check** chooses between:
+
+- **Decisions API** (default). `POST /v1/decisions` with one `predicate` question per check; it returns the probability of each. Uses `gpt-6-luna`, the only model it supports. Only input tokens are billed (about $0.10 per million), and OpenAI says it's much faster than the Responses API. It doesn't write a reason, so the result screen lists which checks failed.
+- **Responses API**. `POST /v1/responses` with a strict JSON schema. The AI answers yes/no per check plus one overall confidence, and writes a short reason. Slower and pricier; you can pick the model.
+
+Both sit behind the `WakeVerifier` protocol, so another model can be swapped in later.
+
+Other settings: your OpenAI API key (saved in the Keychain on this phone only) and strictness. **Practice with this proof** (in a proof) shows what the AI says without touching any alarms. If there's no proof or no API key, the wake screen offers **Stop alarms without proof**, so a setup problem can't trap you.
 
 ### Testing without a key
 
@@ -61,7 +71,7 @@ The simulator has no camera, so simulator builds show a library photo button ins
 
 ### Tests
 
-**Product > Test** (⌘U) runs the unit tests: verdict rules, the OpenAI request body and JSON schema, reply parsing (reasoning items, refusals, cut-off answers, HTTP errors) and photo resizing.
+**Product > Test** (⌘U) runs 30 unit tests: the per-check pass rules, both verifiers' request bodies (Decisions predicates; Responses JSON schema), reply parsing (refusals, missing answers, cut-off answers, HTTP errors) against a stubbed network, and photo resizing.
 
 ## Requirements
 
@@ -119,10 +129,12 @@ WakeUp/
     ActiveMission.swift    Which proof the alarm uses
     ImageResizer.swift     Shrinks photos to 1024 px JPEGs
   Verify/
-    WakeVerifier.swift     Verifier protocol, errors, mock verifier
-    OpenAIVerifier.swift   Responses API request and reply parsing
-    VerifierPrompt.swift   Instructions and JSON schema sent to the AI
-    Verdict.swift          The AI's answer and the pass/fail rules
+    WakeVerifier.swift     Verifier protocol, errors, mock verifier, which one to use
+    DecisionsVerifier.swift  Decisions API: one predicate per check (default)
+    ResponsesVerifier.swift  Responses API: JSON answer plus a written reason
+    OpenAIHTTP.swift       Shared request sending and error handling
+    VerifierPrompt.swift   Questions, instructions and JSON schema sent to the AI
+    Verdict.swift          Probability per check and the pass/fail rules
   Camera/
     CameraModel.swift      Live camera (no photo library)
     CameraPreview.swift
