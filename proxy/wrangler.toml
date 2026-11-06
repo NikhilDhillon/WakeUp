@@ -1,0 +1,13 @@
+name = "wakeup-proxy"
+main = "src/worker.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+DAILY_LIMIT = "40"
+GLOBAL_DAILY_LIMIT = "2000"
+
+# Create the namespace once with `npx wrangler kv namespace create LIMITS`
+# and paste the id it prints here.
+[[kv_namespaces]]
+binding = "LIMITS"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"

@@ -24,6 +24,11 @@ enum Strictness: String, CaseIterable, Identifiable {
     }
 }
 
+extension Strictness {
+    /// The bar for each check at this level.
+    var thresholds: ProofThresholds { ProofThresholds(base: threshold) }
+}
+
 /// Which OpenAI API checks the photo.
 enum CheckMethod: String, CaseIterable, Identifiable {
     /// Probabilities per check. Cheaper and faster; no written reason.
@@ -47,6 +52,9 @@ enum AppSettings {
     static let modelKey = "openAIModel"
     static let strictnessKey = "strictness"
     static let checkMethodKey = "checkMethod"
+    static let developerModeKey = "developerMode"
+    static let offlineBackupKey = "offlineBackup"
+    static let keepThumbnailsKey = "keepWakeThumbnails"
     static let defaultModel = "gpt-6-luna"
 
     private static let keychain = KeychainStore()
@@ -68,6 +76,11 @@ enum AppSettings {
 
     static func removeAPIKey() {
         keychain.remove(apiKeyAccount)
+    }
+
+    /// Fall back to the on-phone check when OpenAI can't be reached. On by default.
+    static var offlineBackupEnabled: Bool {
+        UserDefaults.standard.object(forKey: offlineBackupKey) as? Bool ?? true
     }
 
     static var model: String {

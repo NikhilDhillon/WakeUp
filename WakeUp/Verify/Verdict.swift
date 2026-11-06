@@ -13,6 +13,18 @@ enum ProofCheck: String, CaseIterable, Codable, Sendable {
     /// For every check except the screen one, "yes" is what you want.
     var wantsYes: Bool { self != .screenOrPrint }
 
+    /// Short name for lists.
+    var title: String {
+        switch self {
+        case .samePlace: "Right place"
+        case .personPresent: "Person in photo"
+        case .matchesDescription: "Matches description"
+        case .challengeCompleted: "Challenge done"
+        case .appearsAwake: "Looks awake"
+        case .screenOrPrint: "Not a screen or print"
+        }
+    }
+
     /// Shown to you when this check fails.
     var problem: String {
         switch self {
@@ -26,6 +38,46 @@ enum ProofCheck: String, CaseIterable, Codable, Sendable {
     }
 }
 
+/// Who judged a photo.
+enum CheckSource: String, Codable, Sendable {
+    case decisions
+    case responses
+    /// The weaker check on the phone (Vision), used when OpenAI can't be reached.
+    case offline
+
+    var title: String {
+        switch self {
+        case .decisions: "Decisions API"
+        case .responses: "Responses API"
+        case .offline: "On this phone"
+        }
+    }
+}
+
+/// How sure the AI must be about each check. The strictness level sets the
+/// base; a few checks get a small adjustment (the place check is the main
+/// guard against cheating, so it's held to a higher bar, while a face in
+/// dim morning light is judged more kindly). These offsets are starting
+/// values: `eval/run_eval.py` shows whether they suit your photos.
+struct ProofThresholds: Equatable, Sendable {
+    var base: Double
+    var offsets: [ProofCheck: Double] = ProofThresholds.defaultOffsets
+
+    static let defaultOffsets: [ProofCheck: Double] = [
+        .samePlace: 0.05,
+        .appearsAwake: -0.10,
+    ]
+
+    /// The same bar for every check.
+    static func uniform(_ value: Double) -> ProofThresholds {
+        ProofThresholds(base: value, offsets: [:])
+    }
+
+    func threshold(for check: ProofCheck) -> Double {
+        min(max(base + (offsets[check] ?? 0), 0), 1)
+    }
+}
+
 /// What the AI says about one proof photo: for each check, the probability
 /// that its statement is true. Whether that's a pass is decided here, in
 /// code, so the rules stay predictable.
@@ -34,6 +86,12 @@ struct Verdict: Equatable, Sendable {
     /// A short note written by the AI. Only the Responses API gives one;
     /// the Decisions API only returns probabilities.
     var reason: String?
+    var method: CheckSource = .decisions
+    /// The checks that were actually judged. The on-phone check can only
+    /// judge two of the six; the others don't count for or against.
+    var evaluated: Set<ProofCheck> = Set(ProofCheck.allCases)
+    /// Input tokens OpenAI billed for this check, when it said.
+    var inputTokens: Int?
 
     /// How likely this check came out the way you want (0–1). A missing
     /// answer counts as 0, so it can never pass by accident.
@@ -42,19 +100,32 @@ struct Verdict: Equatable, Sendable {
         return check.wantsYes ? p : 1 - p
     }
 
-    /// The weakest check's confidence.
+    /// The weakest judged check's confidence.
     var overallConfidence: Double {
-        ProofCheck.allCases.map(confidence).min() ?? 0
+        weakestCheck.map(confidence) ?? 0
     }
 
-    /// Every check that didn't reach `threshold`, in plain words.
-    func problems(threshold: Double) -> [String] {
+    var weakestCheck: ProofCheck? {
+        ProofCheck.allCases.filter { evaluated.contains($0) }.min { confidence($0) < confidence($1) }
+    }
+
+    /// Every judged check that didn't reach its bar, in plain words.
+    func problems(using thresholds: ProofThresholds) -> [String] {
         ProofCheck.allCases
-            .filter { confidence($0) < threshold }
+            .filter { evaluated.contains($0) && confidence($0) < thresholds.threshold(for: $0) }
             .map(\.problem)
     }
 
+    func passes(using thresholds: ProofThresholds) -> Bool {
+        problems(using: thresholds).isEmpty
+    }
+
+    /// Every judged check that didn't reach `threshold` (the same bar for all).
+    func problems(threshold: Double) -> [String] {
+        problems(using: .uniform(threshold))
+    }
+
     func passes(threshold: Double) -> Bool {
-        problems(threshold: threshold).isEmpty
+        passes(using: .uniform(threshold))
     }
 }

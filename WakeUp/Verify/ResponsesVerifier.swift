@@ -95,7 +95,8 @@ struct ResponsesVerifier: WakeVerifier {
                     .appearsAwake: p(appearsAwake),
                     .screenOrPrint: p(looksLikePhotoOfScreenOrPrint),
                 ],
-                reason: reason
+                reason: reason,
+                method: .responses
             )
         }
     }
@@ -118,7 +119,9 @@ struct ResponsesVerifier: WakeVerifier {
                     guard let text = part["text"] as? String,
                           let answer = try? JSONDecoder().decode(Answer.self, from: Data(text.utf8))
                     else { throw VerifierError.unreadableResponse }
-                    return answer.verdict
+                    var verdict = answer.verdict
+                    verdict.inputTokens = OpenAIHTTP.inputTokens(in: json)
+                    return verdict
                 case "refusal":
                     throw VerifierError.refused(part["refusal"] as? String ?? "No reason given.")
                 default:

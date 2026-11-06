@@ -25,6 +25,24 @@ enum VerifierError: LocalizedError, Equatable {
     case incomplete(String)
     case unreadableResponse
     case network(String)
+    /// The on-phone backup couldn't check the photo either.
+    case offlineCheckFailed(String)
+
+    /// Worth trying again straight away.
+    var isTransient: Bool {
+        switch self {
+        case .network, .server, .incomplete, .unreadableResponse: true
+        default: false
+        }
+    }
+
+    /// OpenAI can't help right now, so the on-phone check may step in.
+    var allowsOfflineBackup: Bool {
+        switch self {
+        case .network, .server, .rateLimited, .invalidAPIKey, .incomplete, .unreadableResponse: true
+        default: false
+        }
+    }
 
     var errorDescription: String? {
         switch self {
@@ -46,6 +64,8 @@ enum VerifierError: LocalizedError, Equatable {
             "Couldn't read the AI's answer. Try again."
         case .network(let message):
             "Couldn't reach OpenAI: \(message)"
+        case .offlineCheckFailed(let message):
+            "Couldn't check the photo on this phone: \(message)"
         }
     }
 }
@@ -68,12 +88,15 @@ enum Verifiers {
             return MockVerifier(passes: mock == "pass")
         }
         #endif
+        let primary: WakeVerifier
         switch AppSettings.checkMethod {
         case .decisions:
-            return DecisionsVerifier(apiKey: AppSettings.apiKey)
+            primary = DecisionsVerifier(apiKey: AppSettings.apiKey)
         case .responses:
-            return ResponsesVerifier(apiKey: AppSettings.apiKey, model: AppSettings.model)
+            primary = ResponsesVerifier(apiKey: AppSettings.apiKey, model: AppSettings.model)
         }
+        guard AppSettings.offlineBackupEnabled else { return primary }
+        return FallbackVerifier(primary: primary, fallback: OfflineVerifier())
     }
 }
 

@@ -16,3 +16,12 @@ xcuserdata/
 # Secrets (never commit API keys)
 *.env
 Secrets.xcconfig
+
+# Evaluation photos stay on this Mac
+eval/photos/*/*
+eval/photos/*/*/*
+eval/proof/reference/*
+eval/proof/config.json
+eval/thresholds.json
+!eval/**/.gitkeep
+__pycache__/

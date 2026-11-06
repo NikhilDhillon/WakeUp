@@ -6,6 +6,10 @@ struct SettingsView: View {
     @AppStorage(AppSettings.strictnessKey) private var strictness = Strictness.normal.rawValue
     @AppStorage(AppSettings.checkMethodKey) private var checkMethod = CheckMethod.decisions.rawValue
 
+    @AppStorage(AppSettings.developerModeKey) private var developerMode = false
+    @AppStorage(AppSettings.offlineBackupKey) private var offlineBackup = true
+    @AppStorage(AppSettings.keepThumbnailsKey) private var keepThumbnails = false
+
     @State private var hasKey = AppSettings.hasAPIKey
     @State private var keyDraft = ""
     @State private var keyError: String?
@@ -80,6 +84,31 @@ struct SettingsView: View {
                     Text("How strict the check is")
                 } footer: {
                     Text("How sure the AI must be about every check (right place, you in the photo, challenge done, awake, not a screen): lenient 50%, normal 70%, strict 85%.")
+                }
+
+                Section {
+                    Toggle("Check on this phone if offline", isOn: $offlineBackup)
+                } header: {
+                    Text("No internet")
+                } footer: {
+                    Text("If OpenAI can't be reached (after one retry), WakeUp checks for your face and the right place on the phone instead. It's a weaker check, so a follow-up check always comes later that morning.")
+                }
+
+                Section {
+                    Toggle("Keep a small thumbnail of wake photos", isOn: $keepThumbnails)
+                } header: {
+                    Text("History")
+                } footer: {
+                    Text("Off by default. Photos are never kept; this saves a tiny 200 px copy on this phone to show in History.")
+                }
+
+                Section {
+                    Toggle("Developer tools", isOn: $developerMode)
+                    if developerMode {
+                        NavigationLink("Open developer tools") { DeveloperView() }
+                    }
+                } footer: {
+                    Text("Test alarms and a look at what's scheduled.")
                 }
             }
             .navigationTitle("Settings")

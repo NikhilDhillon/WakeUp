@@ -74,6 +74,9 @@ struct DecisionsVerifier: WakeVerifier {
         guard probabilities.count == ProofCheck.allCases.count else {
             throw VerifierError.unreadableResponse
         }
-        return Verdict(probabilities: probabilities, reason: nil)
+        return Verdict(
+            probabilities: probabilities, reason: nil, method: .decisions,
+            inputTokens: OpenAIHTTP.inputTokens(in: json)
+        )
     }
 }

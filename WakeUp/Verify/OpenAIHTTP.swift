@@ -3,8 +3,15 @@ import Foundation
 /// Sending requests to OpenAI and turning HTTP errors into friendly ones.
 /// Shared by both verifiers.
 enum OpenAIHTTP {
-    static func post(_ body: [String: Any], to url: URL, apiKey: String, session: URLSession) async throws -> (Data, Int) {
-        var request = URLRequest(url: url, timeoutInterval: 60)
+    /// A check should answer well within this; longer and the offline
+    /// backup takes over (after one retry).
+    static let requestTimeout: TimeInterval = 20
+
+    static func post(
+        _ body: [String: Any], to url: URL, apiKey: String, session: URLSession,
+        timeout: TimeInterval = requestTimeout
+    ) async throws -> (Data, Int) {
+        var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -32,6 +39,12 @@ enum OpenAIHTTP {
         }
         guard let json else { throw VerifierError.unreadableResponse }
         return json
+    }
+
+    /// Input tokens OpenAI says it billed, if the reply includes usage.
+    static func inputTokens(in json: [String: Any]) -> Int? {
+        guard let usage = json["usage"] as? [String: Any] else { return nil }
+        return (usage["input_tokens"] as? Int) ?? (usage["prompt_tokens"] as? Int)
     }
 
     static func imagePart(_ data: Data) -> [String: Any] {

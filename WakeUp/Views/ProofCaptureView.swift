@@ -1,4 +1,5 @@
 import PhotosUI
+import SwiftData
 import SwiftUI
 
 /// Take a live photo, send it to the AI, and show the result.
@@ -7,6 +8,8 @@ import SwiftUI
 struct ProofCaptureView: View {
     enum Mode {
         case wake
+        /// The "Still up?" check after a pass.
+        case followUp
         case practice
     }
 
@@ -16,6 +19,8 @@ struct ProofCaptureView: View {
     var onPassed: (Verdict) -> Void = { _ in }
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var context
+    @AppStorage(AppSettings.keepThumbnailsKey) private var keepThumbnails = false
     @State private var camera = CameraModel()
     @State private var stage: Stage = .camera
     @State private var cameraError: String?
@@ -31,7 +36,7 @@ struct ProofCaptureView: View {
         case failed(Data, String)
     }
 
-    private var threshold: Double { AppSettings.strictness.threshold }
+    private var thresholds: ProofThresholds { AppSettings.strictness.thresholds }
 
     var body: some View {
         ZStack {
@@ -213,7 +218,7 @@ struct ProofCaptureView: View {
     }
 
     private func resultCard(_ verdict: Verdict) -> some View {
-        let problems = verdict.problems(threshold: threshold)
+        let problems = verdict.problems(using: thresholds)
         let passed = problems.isEmpty
         return VStack(alignment: .leading, spacing: 12) {
             Label(
@@ -223,7 +228,16 @@ struct ProofCaptureView: View {
             .font(.title2.bold())
             .foregroundStyle(passed ? .green : .red)
 
-            if let reason = verdict.reason {
+            if verdict.method == .offline {
+                Label(
+                    passed
+                        ? "Checked offline. OpenAI couldn't be reached, so only your face and the place were checked. A follow-up check will come."
+                        : "Checked offline, because OpenAI couldn't be reached.",
+                    systemImage: "wifi.slash"
+                )
+                .font(.subheadline)
+                .foregroundStyle(.orange)
+            } else if let reason = verdict.reason {
                 Text(reason)
             } else if passed {
                 Text("Every check passed.")
@@ -241,6 +255,7 @@ struct ProofCaptureView: View {
             Text("Weakest check: \(Int((verdict.overallConfidence * 100).rounded()))% sure")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .accessibilityLabel("Weakest check, \(Int((verdict.overallConfidence * 100).rounded())) percent sure")
 
             if passed {
                 Button {
@@ -287,12 +302,33 @@ struct ProofCaptureView: View {
         }
     }
 
+    /// Saves the attempt for the History screen, and counts a failure
+    /// against this morning. Practice runs aren't kept.
+    private func record(_ verdict: Verdict, seconds: Double, small: Data) {
+        guard mode != .practice else { return }
+        let passed = verdict.passes(using: thresholds)
+        let thumbnail = keepThumbnails ? ImageResizer.jpegData(from: small, maxDimension: 200) : nil
+        context.insert(ProofAttempt(
+            date: .now,
+            kind: mode == .followUp ? .followUp : .wake,
+            missionName: mission.name,
+            challenge: challenge.instruction,
+            verdict: verdict,
+            passed: passed,
+            duration: seconds,
+            thumbnail: thumbnail
+        ))
+        if !passed { WakeCoordinator.shared.proofFailed() }
+    }
+
     private func check(_ photo: Data) async {
         stage = .checking(photo)
         guard let small = ImageResizer.jpegData(from: photo) else {
             stage = .failed(photo, "Couldn't read the photo. Retake it.")
             return
         }
+        let clock = ContinuousClock()
+        let started = clock.now
         let request = VerificationRequest(
             photo: small,
             referencePhotos: mission.orderedPhotos.map(\.jpegData),
@@ -302,9 +338,17 @@ struct ProofCaptureView: View {
         )
         do {
             let verdict = try await Verifiers.current().verify(request)
+            let seconds = started.duration(to: clock.now).seconds
+            record(verdict, seconds: seconds, small: small)
             stage = .result(photo, verdict)
         } catch {
             stage = .failed(photo, error.localizedDescription)
         }
+    }
+}
+
+private extension Duration {
+    var seconds: Double {
+        Double(components.seconds) + Double(components.attoseconds) / 1e18
     }
 }
