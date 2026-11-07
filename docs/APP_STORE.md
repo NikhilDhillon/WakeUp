@@ -38,7 +38,7 @@ With the on-phone check or the user's own OpenAI key the app itself collects not
 
 ## 5. Before submitting
 
-- [ ] Real-device pass of every item in PLAN.md "Open checks"
+- [ ] Real-device pass of every check in [PHONE_TESTS.md](PHONE_TESTS.md)
 - [ ] A week of real mornings with no surprises
 - [ ] Screenshots, description, age rating (4+), support URL
 - [ ] Privacy policy hosted and linked

@@ -17,7 +17,7 @@ Everything here needs the real phone (the simulator can't do alarms, the camera 
 - [ ] Add the 7:00 weekday alarm (or choose your own). Finish.
 - [ ] Settings > Run setup again opens the flow again.
 
-## 2. The AI check (the five open checks from PLAN.md)
+## 2. The AI check
 
 - [ ] **Saving the key** worked in step 1; also try Settings > Remove key, then save it again.
 - [ ] **A pass:** practice with the right place and challenge. Note how long the check took (History shows it later).
@@ -36,7 +36,7 @@ Everything here needs the real phone (the simulator can't do alarms, the camera 
 - [ ] Pass the check. The remaining alarms in the chain are cancelled (Developer tools list shows them gone).
 - [ ] Open an alarm, set Sound to **Loud beeps**, and set it a few minutes ahead. Confirm the loud tone plays when it rings. (Developer test chains always use the standard sound.)
 
-## 4. A full morning (the phase 4 "done when")
+## 4. A full morning
 
 Set a real alarm for every day, 5 minutes from now. Follow-up after 5 minutes.
 

@@ -25,3 +25,9 @@ eval/proof/config.json
 eval/thresholds.json
 !eval/**/.gitkeep
 __pycache__/
+
+# Plans and handoff notes stay on this Mac
+PLAN.md
+HANDOFF.md
+docs/REDESIGN.md
+docs/redesign/

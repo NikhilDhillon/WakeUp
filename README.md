@@ -16,22 +16,6 @@ You describe what "up" looks like (for example, *me sitting in the washroom with
 
 Simulator screenshots from a debug build with `-WakeUpSampleData` sample data.
 
-## Status
-
-The full plan for every phase, with open checks and risks, is in [PLAN.md](PLAN.md).
-
-| Phase | What | State |
-|---|---|---|
-| 0 | Xcode project, signing | Done |
-| 1 | AlarmKit alarm chain and "Prove I'm up" button | Built and tested in the simulator; the "Prove I'm up" button still needs testing on a real iPhone |
-| 2 | Proofs: description and reference photos | Done, tested in the simulator |
-| 3 | Live camera and the OpenAI check (Decisions API) | Built; unit tested; flow tested in the simulator with a mock verdict. Needs a real run with your key on the phone |
-| 4 | Real morning alarms: repeating days and the follow-up check | Built and unit tested; not yet tried on the phone |
-| 5 | Accuracy, offline backup and history | Built and unit tested; `eval/` needs your photos |
-| 6 | Polish and first-run setup | Built (no widget) |
-| 7 | Optional: sharing it with other people | Proxy, in-app service option and docs done; shipping needs the paid developer program |
-| R | Redesign: Next Up home and Bedside wake screen | Built and unit tested; looked at in the simulator. Needs a real morning on the phone (see [docs/REDESIGN.md](docs/REDESIGN.md)) |
-
 ## The home and wake screens
 
 **Alarms** (home) leads with one **Next Up** card: the alarm that rings next, a countdown, its days, its place, a **Skip** chip (greyed out, with the reason, when skipping isn't allowed) and a difficulty chip. Above it a single status pill says "Ready for tomorrow" or shows the worst problem with a button that fixes it ("+2" opens the full list). Below are the other alarms and a strip of the last seven mornings that opens History.
@@ -53,7 +37,7 @@ AlarmKit always shows a Stop button that apps can't remove. So a wake-up is a **
 
 Opening the app yourself while a chain is going also takes you to the proof screen.
 
-## Proofs (phase 2)
+## Proofs
 
 A proof is what the AI checks your morning photo against:
 
@@ -65,7 +49,7 @@ Photos are shrunk to 1024 px on the long side (about 200–400 KB each) and stor
 
 Tested in the simulator: the editor won't save until all three parts are there and says what's missing; adding, removing and saving photos works; the proof survives an app restart and shows on the home and wake screens.
 
-## The AI check (phase 3)
+## The AI check
 
 On the wake screen, **Take proof photo** opens a camera that can only take a new photo (front camera by default, with a flip button). The photo, your reference photos, your description and the day's challenge go to OpenAI, which judges six checks:
 
@@ -101,22 +85,22 @@ The simulator has no camera, so simulator builds show a library photo button ins
 
 **Product > Test** (⌘U) runs the unit tests: the per-check pass rules, both verifiers' request bodies (Decisions predicates; Responses JSON schema), reply parsing (refusals, missing answers, cut-off answers, HTTP errors) against a stubbed network, and photo resizing.
 
-## Alarms, follow-up and skipping (phase 4)
+## Alarms, follow-up and skipping
 
 Add alarms on the home screen: a time, the days, an optional proof, how many times it re-rings and a follow-up delay. The app schedules each alarm's chain for the next few mornings and tops them up whenever it opens, after each pass and in a nightly background refresh, so it rings even on days you don't open it. If an alarm has a follow-up (Customize › Check again after), **Still up?** rings once more after that delay with a different challenge. **Skip** (next to an alarm) skips the next morning; it must be done the day before, and at most 2 skips are allowed in any 7 days. A developer switch in Settings shows test alarms and what's scheduled.
 
-## History, offline backup and accuracy (phase 5)
+## History, offline backup and accuracy
 
 - **History** lists each morning's checks: the alarm time, when you were up and how long after, and how many tries it took. The streak goes by what happened: a morning whose alarm rang out without a pass breaks it, while days with no alarm, skips and alarms you turned off don't, so changing alarms later never rewrites it. Developer-tools test runs aren't recorded. Photos aren't kept; an optional 200 px thumbnail can be.
 - **Offline backup:** if OpenAI can't be reached after a retry (20 s timeout), a check on the phone with Apple's Vision looks for a face and the right place. It's weaker, so it's labelled "Checked offline" and a follow-up always comes.
 - **Per-check thresholds:** strictness sets the base; the place check is held 5 points higher (never above 97%) and the awake check 10 lower.
 - **`eval/`:** `python3 eval/run_eval.py` scores labelled photos; see [eval/README.md](eval/README.md).
 
-## Setup, polish and sharing (phases 6 and 7)
+## Setup, polish and sharing
 
-First launch walks through permissions, how photos are checked, a first proof (reference photos can be taken with the camera), a practice run and a first alarm. The home screen warns about blocked alarms, a low battery, Low Power Mode and a development build about to expire. There's an app icon, a loud alarm sound option and a warning before deleting a proof an alarm uses.
+First launch walks through permissions (alarms, camera, notifications), your OpenAI key, a first proof (reference photos can be taken with the camera), a practice run and a first alarm. The home screen warns about blocked alarms, a low battery, Low Power Mode and a development build about to expire. There's an app icon, a loud alarm sound option and a warning before deleting a proof an alarm uses.
 
-To let other people use it without their own key, deploy [proxy/](proxy/README.md) and choose **Check with > WakeUp service** in Settings. Photos are only sent after the user agrees to a notice, and **On this phone only** sends nothing. Drafts for the App Store are in [docs/](docs/).
+To let other people use it without their own key, deploy [proxy/](proxy/README.md) and choose **Check with › WakeUp service** in Settings › Developer tools. Photos are only sent after the user agrees to a notice, and **On this phone only** sends nothing. Drafts for the App Store are in [docs/](docs/).
 
 ## Requirements
 
@@ -132,29 +116,17 @@ To let other people use it without their own key, deploy [proxy/](proxy/README.m
 
 With a free Apple ID, the app stops opening after 7 days. Run it from Xcode again to reinstall it.
 
-## Phase 1 test on the phone
+## Trying it on the phone
 
-1. Open the app and tap **Allow alarms**.
-2. Under **Quick test**, tap **Ring in 1 minute** (3 alarms, 1 minute apart).
-3. Lock the phone and wait.
-4. When it rings, tap **Prove I'm up**. Check that:
-   - the app opens on the **Prove you're up** screen
-   - tapping **Not yet** and waiting brings the next alarm a minute later
-   - tapping **Test: count as passed** stops the rest of the chain
+The simulator can't show a ringing alarm, so this needs the iPhone.
+
+1. In Settings, turn on **Developer tools** and open **Photo check and test alarms**.
+2. Under **Quick test**, tap **Ring in 1 minute** (3 alarms, 1 minute apart), then lock the phone.
+3. When it rings, press **Stop**: a "Next ring at…" note should appear. On the last ring, Stop brings it back a few seconds later.
+4. Tap **Prove I'm up** and take the photo. A pass cancels the rest of the test; test runs aren't saved to History.
 5. Try it once with the ringer switch on silent too.
 
-If tapping **Prove I'm up** doesn't open the app, open WakeUp yourself while the chain is going. It goes straight to the proof screen.
-
-### What the simulator showed (iOS 26.5, Nov 5 2026)
-
-| Check | Result |
-|---|---|
-| Alarm permission prompt shows the WakeUp message | Works |
-| Chain of 3 alarms, 1 minute apart, each rings on time | Works |
-| Alarm shows "Time to prove you're up" with a camera button and the system X | Works |
-| Opening the app while a chain is going shows the proof screen | Works |
-| "Test: count as passed" stops the ringing alarm and cancels the rest of the chain | Works |
-| Tapping the camera button ("Prove I'm up") opens the app | **Not working in the simulator.** iOS reports `Could not find an intent with identifier ProveAwakeIntent`. The likely cause is that simulator builds aren't signed with a team (`Unable to get teamId`), so iOS won't share the intent's details with the app. Phone builds are signed with your team, so this needs checking on the phone. |
+The full checklist is in [docs/PHONE_TESTS.md](docs/PHONE_TESTS.md).
 
 ## Project layout
 
@@ -163,7 +135,7 @@ WakeUp/
   WakeUpApp.swift          App entry, shows the proof screen when needed
   Alarm/
     AlarmService.swift     Schedules and cancels the alarm chain (AlarmKit)
-    ChainStore.swift       Remembers which alarms belong to the current chain
+    ScheduleStore.swift    Saved alarms, scheduled chains and missed mornings
     ProveAwakeIntent.swift The "Prove I'm up" alarm button
     RingStoppedIntent.swift The Stop button: next-ring note, or ring the last one again
     RingNotice.swift       The "Next ring at…" notification and ring titles
