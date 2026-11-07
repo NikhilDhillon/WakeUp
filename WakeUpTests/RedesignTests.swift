@@ -79,7 +79,7 @@ struct HomeStatusTests {
             (.alarmsBlocked, "Alarms are off for WakeUp", .openSystemSettings),
             (.cameraDenied, "Camera is blocked", .openSystemSettings),
             (.noProof, "Choose a place", .chooseProof),
-            (.cannotCheckPhoto, "Photo check isn't set up", .openAppSettings),
+            (.cannotCheckPhoto, "Photo check isn't set up", .setUpPhotoCheck),
             (.lowBattery, "Battery low, plug in tonight", nil),
             (.buildExpiring(daysLeft: 2), "Build expires in 2 days", nil),
             (.buildExpiring(daysLeft: 1), "Build expires in 1 day", nil),
@@ -126,8 +126,23 @@ struct AlarmDifficultyTests {
 
     @Test func presetValuesAreTheDocumentedOnes() {
         #expect(AlarmDifficulty.gentle.values == .init(chainLength: 5, intervalMinutes: 5, followUpMinutes: 0))
-        #expect(AlarmDifficulty.firm.values == .init(chainLength: 10, intervalMinutes: 3, followUpMinutes: 12))
-        #expect(AlarmDifficulty.relentless.values == .init(chainLength: 10, intervalMinutes: 2, followUpMinutes: 10))
+        #expect(AlarmDifficulty.firm.values == .init(chainLength: 10, intervalMinutes: 3, followUpMinutes: 0))
+        #expect(AlarmDifficulty.relentless.values == .init(chainLength: 10, intervalMinutes: 2, followUpMinutes: 0))
+    }
+
+    @Test func noPresetHasAFollowUp() {
+        for level in AlarmDifficulty.presets {
+            #expect(level.values?.followUpMinutes == 0)
+        }
+    }
+
+    @Test func alarmsOnTheOldPresetsLoseTheirFollowUp() {
+        // Old Firm and old Relentless: follow-up off, so they match again.
+        #expect(AlarmDifficulty.followUpAfterPresetChange(chainLength: 10, intervalMinutes: 3, followUpMinutes: 12) == 0)
+        #expect(AlarmDifficulty.followUpAfterPresetChange(chainLength: 10, intervalMinutes: 2, followUpMinutes: 10) == 0)
+        // Anything you set yourself stays as it is.
+        #expect(AlarmDifficulty.followUpAfterPresetChange(chainLength: 7, intervalMinutes: 4, followUpMinutes: 12) == 12)
+        #expect(AlarmDifficulty.followUpAfterPresetChange(chainLength: 10, intervalMinutes: 3, followUpMinutes: 15) == 15)
     }
 
     @Test func presetsStayInsideTheModelsLimits() {
@@ -153,8 +168,19 @@ struct AlarmDifficultyTests {
     }
 
     @Test func chipText() {
-        #expect(AlarmDifficulty.chipText(chainLength: 10, intervalMinutes: 3, followUpMinutes: 12) == "Firm · 10 rings")
+        #expect(AlarmDifficulty.chipText(chainLength: 10, intervalMinutes: 3, followUpMinutes: 0) == "Firm · 10 rings")
+        // A follow-up added by hand makes it Custom.
+        #expect(AlarmDifficulty.chipText(chainLength: 10, intervalMinutes: 3, followUpMinutes: 12) == "Custom · 10 rings")
         #expect(AlarmDifficulty.chipText(chainLength: 1, intervalMinutes: 3, followUpMinutes: 12) == "Custom · 1 ring")
+    }
+
+    @Test func summaryIsTwoShortLines() {
+        #expect(AlarmDifficulty.summary(chainLength: 10, intervalMinutes: 3, followUpMinutes: 12)
+            == "Rings 10 times, 3 min apart, until a photo passes.\nChecks again 12 min after you pass.")
+        #expect(AlarmDifficulty.summary(chainLength: 5, intervalMinutes: 5, followUpMinutes: 0)
+            == "Rings 5 times, 5 min apart, until a photo passes.\nNo check after you pass.")
+        #expect(AlarmDifficulty.summary(chainLength: 1, intervalMinutes: 3, followUpMinutes: 0)
+            == "Rings once, until a photo passes.\nNo check after you pass.")
     }
 }
 
@@ -165,18 +191,17 @@ struct RecentDaysTests {
     private let now = date(2026, 11, 6, 7)
 
     private func marks(
-        passes: [Date] = [], weekdays: Set<Int> = .weekdays, skips: [Date] = [], since: Date? = nil,
-        now: Date? = nil, count: Int = 7
+        passes: [Date] = [], missed: [Date] = [], todayHasAlarm: Bool = true, now: Date? = nil, count: Int = 7
     ) -> [DayMark] {
         HistoryMath.recentDays(
-            passDays: Set(passes), alarmWeekdays: weekdays, skippedDays: Set(skips), trackingSince: since,
+            passDays: Set(passes), missedDays: Set(missed), todayHasAlarm: todayHasAlarm,
             now: now ?? self.now, count: count, calendar: calendar()
         ).map(\.mark)
     }
 
     @Test func sevenDaysOldestFirstEndingToday() {
         let days = HistoryMath.recentDays(
-            passDays: [], alarmWeekdays: .weekdays, skippedDays: [], now: now, calendar: calendar()
+            passDays: [], missedDays: [], todayHasAlarm: true, now: now, calendar: calendar()
         ).map(\.day)
         #expect(days.count == 7)
         #expect(days.first == date(2026, 10, 31))
@@ -185,7 +210,10 @@ struct RecentDaysTests {
 
     @Test func passedMissedUpcomingAndNone() {
         // Sat 31, Sun 1, Mon 2, Tue 3, Wed 4, Thu 5, Fri 6.
-        let result = marks(passes: [date(2026, 11, 2, 6, 50), date(2026, 11, 3, 6, 50), date(2026, 11, 5, 6, 50)])
+        let result = marks(
+            passes: [date(2026, 11, 2, 6, 50), date(2026, 11, 3, 6, 50), date(2026, 11, 5, 6, 50)],
+            missed: [date(2026, 11, 4)]
+        )
         #expect(result == [.none, .none, .passed, .passed, .missed, .passed, .upcoming])
     }
 
@@ -193,28 +221,26 @@ struct RecentDaysTests {
         #expect(marks(passes: [date(2026, 11, 6, 6, 50)]).last == .passed)
     }
 
-    @Test func skippedDaysAreGreyEvenWithoutAPass() {
-        #expect(marks(skips: [date(2026, 11, 4)])[4] == .none)
+    @Test func pastDaysWithNothingRecordedAreGrey() {
+        // No pass and nothing rang out: no alarm, a skip, or one turned off.
+        #expect(marks()[0..<6].allSatisfy { $0 == .none })
     }
 
-    @Test func noEnabledAlarmMeansAllGrey() {
-        #expect(Set(marks(weekdays: [])) == [.none])
+    @Test func todayWithNoAlarmDueIsGrey() {
+        #expect(marks(todayHasAlarm: false).last == DayMark.none)
     }
 
-    @Test func daysBeforeTheFirstAlarmAreGrey() {
-        let result = marks(since: date(2026, 11, 5, 18))
-        #expect(result == [.none, .none, .none, .none, .none, .missed, .upcoming])
-    }
-
-    @Test func weekBoundaryRespectsTheAlarmsDays() {
-        // Weekend-only alarm; Friday is today with no alarm.
-        let result = marks(weekdays: [1, 7])
-        #expect(result == [.missed, .missed, .none, .none, .none, .none, .none])
+    @Test func pastDaysDontDependOnTodaysAlarms() {
+        let passes = [date(2026, 11, 3, 6, 50)]
+        let missed = [date(2026, 11, 4)]
+        let withAlarm = marks(passes: passes, missed: missed, todayHasAlarm: true)
+        let without = marks(passes: passes, missed: missed, todayHasAlarm: false)
+        #expect(Array(withAlarm.dropLast()) == Array(without.dropLast()))
     }
 
     @Test func daylightSavingDayIsOneDay() {
         // Seven days ending Mon Nov 2 span the Nov 1 clock change.
-        let result = marks(passes: [date(2026, 11, 1, 6, 50)], weekdays: .everyDay, now: date(2026, 11, 2, 7))
+        let result = marks(passes: [date(2026, 11, 1, 6, 50)], now: date(2026, 11, 2, 7))
         #expect(result.count == 7)
         #expect(result[result.count - 2] == .passed)
         #expect(result.last == .upcoming)

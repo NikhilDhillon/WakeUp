@@ -17,7 +17,7 @@ final class WakeAlarm {
     var isEnabled: Bool = true
     var chainLength: Int = 10
     var chainIntervalMinutes: Int = 3
-    var followUpMinutes: Int = 12
+    var followUpMinutes: Int = 0
     var skippedDays: [Date] = []
     var soundRaw: String = AlarmSound.standard.rawValue
     var createdAt: Date = Date()

@@ -15,10 +15,9 @@ struct AlarmEditorView: View {
     @State private var missionID = ""
     @State private var chainLength = 10
     @State private var intervalMinutes = 3
-    @State private var followUpMinutes = 12
+    @State private var followUpMinutes = 0
     @State private var sound = AlarmSound.standard.rawValue
     @State private var loaded = false
-    @State private var showingCustom = false
     @State private var confirmingDelete = false
 
     var body: some View {
@@ -41,30 +40,11 @@ struct AlarmEditorView: View {
                 .font(.footnote)
             }
 
-            Section {
-                Picker("Difficulty", selection: difficultyBinding) {
-                    ForEach(difficultyOptions) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                if difficulty == .custom || showingCustom {
-                    Stepper("Rings up to \(chainLength) times", value: $chainLength, in: WakeAlarm.chainLengthRange)
-                    Stepper("Every \(intervalMinutes) min", value: $intervalMinutes, in: WakeAlarm.chainIntervalRange)
-                    Picker("Check again after", selection: $followUpMinutes) {
-                        Text("Off").tag(0)
-                        ForEach(WakeAlarm.followUpChoices.filter { $0 > 0 }, id: \.self) { minutes in
-                            Text("\(minutes) min").tag(minutes)
-                        }
-                    }
-                } else {
-                    Button("Customize") { showingCustom = true }
-                        .font(.footnote)
-                        .buttonStyle(.borderless)
-                }
-            } header: {
-                Text("Difficulty")
-            } footer: {
-                Text(difficultyFooter)
-            }
+            DifficultySection(
+                chainLength: $chainLength,
+                intervalMinutes: $intervalMinutes,
+                followUpMinutes: $followUpMinutes
+            )
 
             Section {
                 TextField("Label (optional)", text: $label)
@@ -113,41 +93,6 @@ struct AlarmEditorView: View {
             }
         }
         .onAppear(perform: load)
-    }
-
-    private var difficulty: AlarmDifficulty {
-        AlarmDifficulty.matching(chainLength: chainLength, intervalMinutes: intervalMinutes, followUpMinutes: followUpMinutes)
-    }
-
-    /// The presets, plus Custom while the values match none of them.
-    private var difficultyOptions: [AlarmDifficulty] {
-        difficulty == .custom ? AlarmDifficulty.presets + [.custom] : AlarmDifficulty.presets
-    }
-
-    private var difficultyBinding: Binding<AlarmDifficulty> {
-        Binding(
-            get: { difficulty },
-            set: { level in
-                guard let values = level.values else { return }
-                chainLength = values.chainLength
-                intervalMinutes = values.intervalMinutes
-                followUpMinutes = values.followUpMinutes
-            }
-        )
-    }
-
-    private var difficultyFooter: String {
-        let rings = "It keeps ringing, \(chainLength) times \(intervalMinutes) minutes apart, until a photo passes."
-        let follow = followUpMinutes > 0
-            ? " After you pass, \"Still up?\" rings once more after \(followUpMinutes) minutes with a different challenge, so going back to bed doesn't work."
-            : " There is no follow-up check."
-        return rings + follow + " That's \(alarmsPerDayText)."
-    }
-
-    private var alarmsPerDayText: String {
-        let perMorning = chainLength
-        let ahead = perMorning * SchedulePlanner.windowDays
-        return "\(perMorning) alarms a morning, up to \(ahead) scheduled ahead"
     }
 
     private func load() {

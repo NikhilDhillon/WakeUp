@@ -13,6 +13,8 @@ struct NextAlarmCard: View {
     var onToggleSkip: () -> Void
     /// Called just before the on/off switch changes the alarm.
     var willToggle: () -> Void = {}
+    /// The difficulty chip: edits just the difficulty, not the whole alarm.
+    var onEditDifficulty: () -> Void = {}
 
     var body: some View {
         // The countdown ticks once a minute.
@@ -32,7 +34,7 @@ struct NextAlarmCard: View {
             .buttonStyle(.plain)
             .accessibilityHidden(true)
 
-            DayDots(weekdays: alarm.weekdays)
+            DayDots(weekdays: alarm.weekdays, onToggle: toggleDay)
 
             Divider()
 
@@ -54,12 +56,28 @@ struct NextAlarmCard: View {
         .accessibilityLabel(spokenSummary(now: now))
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(named: "Edit alarm", onEdit)
+        .accessibilityAction(named: "Change difficulty", onEditDifficulty)
         .accessibilityAction(named: alarm.isEnabled ? "Turn off" : "Turn on") {
             willToggle()
             alarm.isEnabled.toggle()
         }
         .accessibilityAction(named: "Open place", onOpenPlace)
         .modifier(SkipActionModifier(chip: chip, perform: onToggleSkip))
+    }
+
+    /// Flips one day. The last remaining day stays on: an alarm needs a day,
+    /// and the editor won't save one without.
+    private func toggleDay(_ weekday: Int) {
+        var days = alarm.weekdays
+        if days.contains(weekday) {
+            guard days.count > 1 else { return }
+            days.remove(weekday)
+        } else {
+            days.insert(weekday)
+        }
+        // Changing days can change which alarm is next; keep this card put.
+        willToggle()
+        alarm.weekdays = days
     }
 
     // MARK: Parts
@@ -120,7 +138,7 @@ struct NextAlarmCard: View {
 
     @ViewBuilder
     private func chips(_ chip: NextUp.SkipChip?) -> some View {
-        let difficulty = Button(action: onEdit) {
+        let difficulty = Button(action: onEditDifficulty) {
             chipLabel(
                 AlarmDifficulty.chipText(
                     chainLength: alarm.chainLength, intervalMinutes: alarm.chainIntervalMinutes,
