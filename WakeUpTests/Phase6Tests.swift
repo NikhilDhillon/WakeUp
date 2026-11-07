@@ -6,7 +6,7 @@ struct HealthCheckTests {
     private func healthy() -> HealthInputs {
         HealthInputs(
             alarmsAllowed: true, hasEnabledAlarm: true, lowPowerMode: false, batteryLevel: 0.8,
-            isCharging: false, daysSinceInstall: nil, hasProof: true, canCheckPhoto: true, cameraDenied: false
+            isCharging: false, daysUntilBuildExpires: nil, hasProof: true, canCheckPhoto: true, cameraDenied: false
         )
     }
 
@@ -39,14 +39,43 @@ struct HealthCheckTests {
         #expect(HealthCheck.warnings(input).isEmpty)
     }
 
-    @Test func freeBuildWarnsFromDayFive() {
+    @Test func freeBuildWarnsInItsLastTwoDays() {
         var input = healthy()
-        input.daysSinceInstall = 4
+        input.daysUntilBuildExpires = 6
         #expect(HealthCheck.warnings(input).isEmpty)
-        input.daysSinceInstall = 5
+        input.daysUntilBuildExpires = 3
+        #expect(HealthCheck.warnings(input).isEmpty)
+        input.daysUntilBuildExpires = 2
         #expect(HealthCheck.warnings(input) == [.buildExpiring(daysLeft: 2)])
-        input.daysSinceInstall = 9
+        input.daysUntilBuildExpires = 0
         #expect(HealthCheck.warnings(input) == [.buildExpiring(daysLeft: 0)])
+    }
+
+    @Test func expiryIsReadFromTheProvisioningProfile() {
+        // A profile is binary signing data wrapped around a plist.
+        let plist = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0"><dict>
+        <key>CreationDate</key><date>2026-11-07T00:43:07Z</date>
+        <key>ExpirationDate</key><date>2026-11-14T00:43:07Z</date>
+        </dict></plist>
+        """
+        var data = Data([0x30, 0x82, 0x01, 0xFF, 0x00])
+        data.append(Data(plist.utf8))
+        data.append(Data([0xA0, 0x00, 0x31]))
+        let expiry = BuildExpiry.expirationDate(inProfile: data)
+        #expect(expiry == ISO8601DateFormatter().date(from: "2026-11-14T00:43:07Z"))
+
+        // Installed minutes ago: a full 6 days and change left, so no warning.
+        let justInstalled = ISO8601DateFormatter().date(from: "2026-11-07T01:24:00Z")!
+        #expect(BuildExpiry.daysLeft(until: expiry!, now: justInstalled) == 6)
+        let pastIt = ISO8601DateFormatter().date(from: "2026-11-15T00:00:00Z")!
+        #expect(BuildExpiry.daysLeft(until: expiry!, now: pastIt) == 0)
+    }
+
+    @Test func noProfileMeansNoExpiry() {
+        #expect(BuildExpiry.expirationDate(inProfile: Data("not a profile".utf8)) == nil)
     }
 
     @Test func missingProofOrCheckingWarns() {

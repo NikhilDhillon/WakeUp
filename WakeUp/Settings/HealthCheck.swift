@@ -9,8 +9,9 @@ struct HealthInputs: Equatable {
     /// 0–1, or a negative number when unknown.
     var batteryLevel: Float
     var isCharging: Bool
-    /// Days since this build was installed, for builds that expire (free Apple ID). nil = doesn't expire.
-    var daysSinceInstall: Int?
+    /// Whole days until this build stops opening (free Apple ID builds), from
+    /// its provisioning profile. nil = it doesn't expire, or it's unknown.
+    var daysUntilBuildExpires: Int?
     var hasProof: Bool
     var canCheckPhoto: Bool
     var cameraDenied: Bool
@@ -54,15 +55,15 @@ enum HealthWarning: Equatable, Identifiable {
         case .noProof:
             "No proof is set up, so the alarm can only be stopped without a photo."
         case .cannotCheckPhoto:
-            "Photos can't be checked yet. Add your OpenAI key, a service URL, or switch to the on-phone check in Settings."
+            "Photos can't be checked yet. Add your OpenAI key, a service URL, or switch to the on-phone check. Tap Set up."
         }
     }
 }
 
 enum HealthCheck {
-    /// Free Apple ID builds stop opening after this many days.
-    static let freeBuildLifetimeDays = 7
-    static let warnFromDay = 5
+    /// Warn once a build has this many days left or fewer (free Apple ID
+    /// builds last 7 days).
+    static let warnWhenDaysLeft = 2
     static let lowBatteryLevel: Float = 0.2
 
     static func warnings(_ input: HealthInputs) -> [HealthWarning] {
@@ -74,11 +75,44 @@ enum HealthCheck {
         if input.batteryLevel >= 0, input.batteryLevel < lowBatteryLevel, !input.isCharging {
             result.append(.lowBattery)
         }
-        if let days = input.daysSinceInstall, days >= warnFromDay {
-            result.append(.buildExpiring(daysLeft: max(freeBuildLifetimeDays - days, 0)))
+        if let days = input.daysUntilBuildExpires, days <= warnWhenDaysLeft {
+            result.append(.buildExpiring(daysLeft: max(days, 0)))
         }
         if !input.hasProof { result.append(.noProof) }
         if !input.canCheckPhoto { result.append(.cannotCheckPhoto) }
         return result
+    }
+}
+
+/// When a development build stops opening. Free Apple ID builds carry a
+/// provisioning profile (`embedded.mobileprovision`) whose ExpirationDate
+/// is the real deadline; App Store and TestFlight builds have none.
+enum BuildExpiry {
+    /// The expiry date in a profile file: a signed wrapper around a plist.
+    static func expirationDate(inProfile data: Data) -> Date? {
+        guard let start = data.range(of: Data("<?xml".utf8)),
+              let end = data.range(of: Data("</plist>".utf8), in: start.lowerBound..<data.endIndex)
+        else { return nil }
+        let plist = data.subdata(in: start.lowerBound..<end.upperBound)
+        let object = try? PropertyListSerialization.propertyList(from: plist, format: nil)
+        return (object as? [String: Any])?["ExpirationDate"] as? Date
+    }
+
+    /// Whole days left before `expiry` (0 on its last day or once passed).
+    static func daysLeft(until expiry: Date, now: Date) -> Int {
+        max(Int(expiry.timeIntervalSince(now) / 86_400), 0)
+    }
+
+    /// Days left for the running build, or nil when it doesn't expire.
+    static func daysLeftForThisBuild(now: Date = .now) -> Int? {
+        #if targetEnvironment(simulator)
+        return nil
+        #else
+        guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
+              let data = try? Data(contentsOf: url),
+              let expiry = expirationDate(inProfile: data)
+        else { return nil }
+        return daysLeft(until: expiry, now: now)
+        #endif
     }
 }
