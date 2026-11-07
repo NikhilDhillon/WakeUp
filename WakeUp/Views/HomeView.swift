@@ -15,11 +15,15 @@ struct HomeView: View {
     @State private var showingSettings = false
     @State private var hasAPIKey = AppSettings.hasAPIKey
     @State private var editing: AlarmEditorTarget?
+    /// The alarm whose difficulty is being changed from the card's chip.
+    @State private var editingDifficulty: WakeAlarm?
     @State private var skipMessage: String?
     @State private var showingSetup = false
     @State private var showingPlaces = false
     @State private var showingHistory = false
     @State private var showingStatusDetails = false
+    /// The photo check on its own, from the "Photo check isn't set up" banner.
+    @State private var showingPhotoCheck = false
     /// Ticks every minute so "next alarm" stays right while the app is open.
     @State private var now = Date.now
     @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
@@ -51,7 +55,8 @@ struct HomeView: View {
                         onEdit: { editing = .existing(alarm) },
                         onOpenPlace: { showingPlaces = true },
                         onToggleSkip: { toggleSkip(alarm) },
-                        willToggle: holdCard
+                        willToggle: holdCard,
+                        onEditDifficulty: { editingDifficulty = alarm }
                     )
                     .plainRow(top: 6, bottom: 8)
                 } else {
@@ -128,6 +133,14 @@ struct HomeView: View {
             }) {
                 SettingsView(onRunSetup: { showingSetup = true })
             }
+            .sheet(item: $editingDifficulty) { alarm in
+                DifficultySheet(alarm: alarm)
+            }
+            .sheet(isPresented: $showingPhotoCheck, onDismiss: {
+                hasAPIKey = AppSettings.hasAPIKey
+            }) {
+                PhotoCheckSheet()
+            }
             .fullScreenCover(isPresented: $showingSetup, onDismiss: { setupCompleted = true }) {
                 OnboardingView()
             }
@@ -162,6 +175,7 @@ struct HomeView: View {
                 #if DEBUG
                 DebugSeed.run(in: context)
                 #endif
+                removeOldPresetFollowUps()
                 // Brand-new installs get the setup flow; anyone with data already doesn't.
                 if !setupCompleted {
                     if missions.isEmpty && alarms.isEmpty && !AppSettings.hasAPIKey {
@@ -207,19 +221,27 @@ struct HomeView: View {
     }
 
     private var streak: Int {
-        HistoryView.streak(attempts: attempts, alarms: alarms, now: now)
+        HistoryView.streak(attempts: attempts, now: now)
     }
 
+    /// Past days from what happened; only today looks at your alarms.
     private var recentDays: [(day: Date, mark: DayMark)] {
-        let passDays = Set(attempts.filter { $0.kind == .wake && $0.passed }.map(\.date))
-        let weekdays = alarms.filter(\.isEnabled).reduce(into: Set<Int>()) { $0.formUnion($1.weekdays) }
-        return HistoryMath.recentDays(
-            passDays: passDays,
-            alarmWeekdays: weekdays,
-            skippedDays: Set(alarms.flatMap(\.skippedDays)),
-            trackingSince: alarms.map(\.createdAt).min(),
+        HistoryMath.recentDays(
+            passDays: HistoryView.passDays(attempts),
+            missedDays: ScheduleStore().missedDays,
+            todayHasAlarm: todayHasAlarm,
             now: now
         )
+    }
+
+    /// An alarm that's on, set for today and not skipped today.
+    private var todayHasAlarm: Bool {
+        let calendar = Calendar.current
+        let weekday = calendar.component(.weekday, from: now)
+        return alarms.contains { alarm in
+            alarm.isEnabled && alarm.weekdays.contains(weekday)
+                && !alarm.skippedDays.contains { calendar.isDate($0, inSameDayAs: now) }
+        }
     }
 
     private var activeMission: Mission? {
@@ -281,8 +303,8 @@ struct HomeView: View {
             if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
         case .chooseProof:
             showingPlaces = true
-        case .openAppSettings:
-            showingSettings = true
+        case .setUpPhotoCheck:
+            showingPhotoCheck = true
         case .showDetails:
             showingStatusDetails = true
         case .requestAuthorization:
@@ -298,27 +320,30 @@ struct HomeView: View {
             lowPowerMode: lowPower,
             batteryLevel: UIDevice.current.batteryLevel,
             isCharging: UIDevice.current.batteryState == .charging || UIDevice.current.batteryState == .full,
-            daysSinceInstall: Self.daysSinceInstall(),
+            daysUntilBuildExpires: BuildExpiry.daysLeftForThisBuild(now: now),
             hasProof: activeMission?.isReady ?? false,
             canCheckPhoto: Verifiers.isConfigured,
             cameraDenied: AVCaptureDevice.authorizationStatus(for: .video) == .denied
         )
     }
 
-    /// Days since a development build was installed. nil for builds that
-    /// don't expire (App Store and TestFlight builds have no embedded profile).
-    private static func daysSinceInstall() -> Int? {
-        #if targetEnvironment(simulator)
-        return nil
-        #else
-        guard Bundle.main.path(forResource: "embedded", ofType: "mobileprovision") != nil,
-              let created = (try? FileManager.default.attributesOfItem(atPath: Bundle.main.bundlePath))?[.creationDate] as? Date
-        else { return nil }
-        return Calendar.current.dateComponents([.day], from: created, to: .now).day
-        #endif
-    }
-
     // MARK: Actions
+
+    /// Firm and Relentless used to include a "Still up?" follow-up; they
+    /// don't any more. Once, turn it off on alarms still set exactly to the
+    /// old versions, so they keep matching their preset.
+    private func removeOldPresetFollowUps() {
+        let key = "removedPresetFollowUps"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        for alarm in alarms {
+            alarm.followUpMinutes = AlarmDifficulty.followUpAfterPresetChange(
+                chainLength: alarm.chainLength,
+                intervalMinutes: alarm.chainIntervalMinutes,
+                followUpMinutes: alarm.followUpMinutes
+            )
+        }
+        UserDefaults.standard.set(true, forKey: key)
+    }
 
     private func syncAlarms() async {
         // Forget skipped days that are long past.
