@@ -52,15 +52,54 @@ struct ScheduledChain: Codable, Equatable, Identifiable, Sendable {
     var timeZoneID: String
     /// Changes when the alarm's time, length, interval or time zone changes.
     var signature: String
+    /// The extra ring scheduled after the last one was stopped (or silenced
+    /// for a photo) without a pass. The last ring keeps coming back until a
+    /// proof passes. nil in chains saved before this existed.
+    var repeatSlotID: UUID?
+    /// When that extra ring goes off.
+    var repeatRing: Date?
 
-    /// When the last alarm in the chain rings.
+    /// Every AlarmKit ID this chain owns, the extra ring included.
+    var allSlotIDs: [UUID] {
+        slotIDs + [repeatSlotID].compactMap { $0 }
+    }
+
+    /// The last ring's AlarmKit ID, which keeps ringing again when stopped.
+    var lastSlotID: UUID? { slotIDs.last }
+
+    /// When the last alarm in the chain rings, counting the extra ring.
     var lastRing: Date {
-        start.addingTimeInterval(interval * Double(max(slotIDs.count - 1, 0)))
+        let planned = start.addingTimeInterval(interval * Double(max(slotIDs.count - 1, 0)))
+        return max(planned, repeatRing ?? planned)
     }
 
     /// How long after the last ring you can still open the app and be sent
     /// to the proof screen.
     static let owedGrace: TimeInterval = 2 * 3600
+
+    /// Stop on the last ring: it rings again this soon.
+    static let ringAgainAfterStop: TimeInterval = 5
+    /// "Prove I'm up" on the last ring: time to take the photo before it
+    /// rings again (a pass cancels it first).
+    static let ringAgainAfterProof: TimeInterval = 2 * 60
+
+    /// Stopping `slotID`: is it the last ring (which keeps coming back)?
+    func isLastRing(_ slotID: UUID) -> Bool {
+        slotID == lastSlotID || slotID == repeatSlotID
+    }
+
+    /// The next planned ring after stopping `slotID` (1-based ring number).
+    /// nil for the last ring, which rings again instead, and unknown IDs.
+    func nextRing(afterStopping slotID: UUID) -> (date: Date, ring: Int, total: Int)? {
+        guard let index = slotIDs.firstIndex(of: slotID), index < slotIDs.count - 1 else { return nil }
+        return (start.addingTimeInterval(interval * Double(index + 1)), index + 2, slotIDs.count)
+    }
+
+    /// When the extra ring after the last one should go off: `delay` from
+    /// now, but never inside a photo window that's already running.
+    static func repeatFireDate(now: Date, delay: TimeInterval, holdUntil: Date?) -> Date {
+        max(now.addingTimeInterval(delay), holdUntil ?? .distantPast)
+    }
 
     func hasStarted(at now: Date) -> Bool { start <= now }
 
@@ -216,7 +255,7 @@ enum SchedulePlanner {
             }
         }
 
-        var used = kept.reduce(0) { $0 + $1.slotIDs.count }
+        var used = kept.reduce(0) { $0 + $1.allSlotIDs.count }
         for (index, planned) in desired.enumerated() where !matched.contains(index) {
             if let slotBudget, used + planned.count > slotBudget { break }
             used += planned.count

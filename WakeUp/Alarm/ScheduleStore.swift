@@ -37,11 +37,36 @@ struct ScheduleStore {
     }
 
     func chain(containing slotID: UUID) -> ScheduledChain? {
-        chains.first { $0.slotIDs.contains(slotID) }
+        chains.first { $0.allSlotIDs.contains(slotID) }
     }
 
     func clear() {
         defaults.removeObject(forKey: chainsKey)
+    }
+
+    // MARK: Missed mornings
+
+    private let missedDaysKey = "history.missedDays"
+    /// How long missed mornings are remembered.
+    static let missedDaysKept = 400
+
+    /// Mornings (start of day) whose alarm rang out without a pass. With the
+    /// passes in History, this is what the streak and week strip go by, so
+    /// later changes to your alarms don't rewrite past days.
+    var missedDays: Set<Date> {
+        Set(read([Date].self, key: missedDaysKey) ?? [])
+    }
+
+    func recordMissed(day: Date, now: Date = .now, calendar: Calendar = .current) {
+        let cutoff = calendar.date(byAdding: .day, value: -Self.missedDaysKept, to: now) ?? .distantPast
+        var days = missedDays.filter { $0 >= cutoff }
+        days.insert(calendar.startOfDay(for: day))
+        write(days.sorted(), key: missedDaysKey)
+    }
+
+    /// "Clear history" forgets these along with the photo attempts.
+    func clearMissedDays() {
+        defaults.removeObject(forKey: missedDaysKey)
     }
 
     private func read<T: Decodable>(_ type: T.Type, key: String) -> T? {
