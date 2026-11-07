@@ -42,8 +42,13 @@ enum DebugSeed {
             else { continue }
             context.insert(ProofAttempt(
                 date: time, kind: .wake, missionName: "Washroom", challenge: "Hold up 3 fingers",
-                verdict: verdict, passed: true, duration: 2, thumbnail: nil
+                verdict: verdict, passed: true, duration: 2, thumbnail: nil,
+                alarmTime: time.addingTimeInterval(-5 * 60)
             ))
+        }
+        // And one morning the alarm rang out, so the strip shows a miss.
+        if let missed = Calendar.current.date(byAdding: .day, value: -4, to: .now) {
+            ScheduleStore().recordMissed(day: missed)
         }
         try? context.save()
     }

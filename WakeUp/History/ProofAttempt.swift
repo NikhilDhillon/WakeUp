@@ -29,12 +29,17 @@ final class ProofAttempt {
     var weakestCheckRaw: String = ""
     var weakestConfidence: Double = 0
     @Attribute(.externalStorage) var thumbnail: Data?
+    /// When the alarm this attempt answered was set to ring (its first
+    /// ring). nil for attempts saved before this was kept.
+    var alarmTime: Date?
 
     init(
         date: Date, kind: AttemptKind, missionName: String, challenge: String,
-        verdict: Verdict, passed: Bool, duration: TimeInterval, thumbnail: Data?
+        verdict: Verdict, passed: Bool, duration: TimeInterval, thumbnail: Data?,
+        alarmTime: Date? = nil
     ) {
         self.date = date
+        self.alarmTime = alarmTime
         self.kindRaw = kind.rawValue
         self.missionName = missionName
         self.challenge = challenge
@@ -63,5 +68,5 @@ final class ProofAttempt {
         }
     }
 
-    var info: AttemptInfo { AttemptInfo(date: date, kind: kind, passed: passed) }
+    var info: AttemptInfo { AttemptInfo(date: date, kind: kind, passed: passed, alarmTime: alarmTime) }
 }

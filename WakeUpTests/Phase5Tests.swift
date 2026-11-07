@@ -38,7 +38,11 @@ struct ThresholdTests {
             #expect((0...1).contains(lenient.threshold(for: check)))
             #expect((0...1).contains(strict.threshold(for: check)))
         }
-        #expect(ProofThresholds(base: 0.98, offsets: [.samePlace: 0.1]).threshold(for: .samePlace) == 1)
+        // An offset can't lift a bar past 97% (or past the base, if that's higher)...
+        #expect(ProofThresholds(base: 0.98, offsets: [.samePlace: 0.1]).threshold(for: .samePlace) == 0.98)
+        #expect(ProofThresholds(base: 0.90, offsets: [.samePlace: 0.1]).threshold(for: .samePlace) == 0.97)
+        // ...and nothing goes above 1.
+        #expect(ProofThresholds(base: 1.2, offsets: [:]).threshold(for: .personPresent) == 1)
     }
 
     @Test func offlineVerdictOnlyCountsWhatItJudged() {
@@ -237,6 +241,48 @@ struct HistoryMathTests {
         #expect(summaries[0].followUpPassed)
     }
 
+    @Test func aMorningKeepsTheAlarmTimeItAnswered() {
+        let summary = HistoryMath.summaries(of: [
+            AttemptInfo(date: date(5, 6, 50), kind: .wake, passed: false, alarmTime: date(5, 6, 45)),
+            AttemptInfo(date: date(5, 6, 53), kind: .wake, passed: true, alarmTime: date(5, 6, 45)),
+            AttemptInfo(date: date(5, 7, 10), kind: .followUp, passed: true, alarmTime: date(5, 7, 5)),
+        ], calendar: calendar)[0]
+        // The follow-up's own chain doesn't replace the morning alarm.
+        #expect(summary.alarmAt == date(5, 6, 45))
+        #expect(summary.upAt == date(5, 6, 53))
+    }
+
+    @Test func olderAttemptsHaveNoAlarmTime() {
+        let summary = HistoryMath.summaries(of: [AttemptInfo(date: date(5), kind: .wake, passed: true)], calendar: calendar)[0]
+        #expect(summary.alarmAt == nil)
+    }
+
+    @Test func olderAttemptsGuessTheAlarmFromTheirWeekday() {
+        // Nov 5, 2026 is a Thursday (weekday 5).
+        let weekday = HistoryMath.AlarmTimeOfDay(hour: 6, minute: 45, weekdays: [2, 3, 4, 5, 6])
+        let early = HistoryMath.AlarmTimeOfDay(hour: 5, minute: 30, weekdays: [2, 4, 6])
+        let weekend = HistoryMath.AlarmTimeOfDay(hour: 9, minute: 30, weekdays: [1, 7])
+        let alarms = [weekday, early, weekend]
+        // The latest alarm before the photo wins.
+        #expect(HistoryMath.likelyAlarm(before: date(5, 6, 50), alarms: alarms, calendar: calendar) == date(5, 6, 45))
+        // An alarm after the photo didn't wake you.
+        #expect(HistoryMath.likelyAlarm(before: date(5, 6, 40), alarms: [weekday], calendar: calendar) == nil)
+        // Too long before the photo to count.
+        #expect(HistoryMath.likelyAlarm(before: date(5, 10, 0), alarms: [weekday], calendar: calendar) == nil)
+        // Not set for that weekday.
+        #expect(HistoryMath.likelyAlarm(before: date(5, 9, 40), alarms: [weekend], calendar: calendar) == nil)
+    }
+
+    @Test func upAfterAlarmReadsNaturally() {
+        let alarm = date(5, 6, 45)
+        #expect(HistoryMath.upAfterAlarm(alarmAt: alarm, upAt: alarm.addingTimeInterval(30)) == "On time")
+        #expect(HistoryMath.upAfterAlarm(alarmAt: alarm, upAt: date(5, 6, 50)) == "5 min after the alarm")
+        #expect(HistoryMath.upAfterAlarm(alarmAt: alarm, upAt: date(5, 7, 45)) == "1 h after the alarm")
+        #expect(HistoryMath.upAfterAlarm(alarmAt: alarm, upAt: date(5, 8, 5)) == "1 h 20 min after the alarm")
+        // A photo before the alarm (opening the app early) is just on time.
+        #expect(HistoryMath.upAfterAlarm(alarmAt: alarm, upAt: date(5, 6, 30)) == "On time")
+    }
+
     @Test func aMorningWithNoPassHasNoTimeUp() {
         let summary = HistoryMath.summaries(of: [AttemptInfo(date: date(5), kind: .wake, passed: false)], calendar: calendar)[0]
         #expect(summary.upAt == nil)
@@ -252,13 +298,10 @@ struct HistoryMathTests {
         #expect(summaries.map(\.day) == [date(5, 0), date(4, 0), date(3, 0)])
     }
 
-    private func streak(
-        passes: [Int], weekdays: Set<Int> = .everyDay, skipped: [Int] = [], today: Int = 5, hour: Int = 20
-    ) -> Int {
+    private func streak(passes: [Int], missed: [Int] = [], today: Int = 5, hour: Int = 20) -> Int {
         HistoryMath.streak(
             passDays: Set(passes.map { date($0) }),
-            alarmWeekdays: weekdays,
-            skippedDays: Set(skipped.map { date($0) }),
+            missedDays: Set(missed.map { date($0, 0) }),
             now: date(today, hour),
             calendar: calendar
         )
@@ -270,25 +313,35 @@ struct HistoryMathTests {
         #expect(streak(passes: [3, 4, 5]) == 3)
     }
 
-    @Test func aMissedMorningBreaksIt() {
-        #expect(streak(passes: [2, 3, 5]) == 1)
+    @Test func aMorningThatRangOutBreaksIt() {
+        #expect(streak(passes: [2, 3, 5], missed: [4]) == 1)
     }
 
     @Test func todayStillOpenDoesNotBreakIt() {
         #expect(streak(passes: [3, 4], today: 5) == 2)
     }
 
-    @Test func daysWithoutAnAlarmDontBreakIt() {
-        // Weekday alarms only. Today is Monday Nov 9; Sat 7 and Sun 8 have no alarm.
-        let passes = [3, 4, 5, 6, 9]
-        #expect(streak(passes: passes, weekdays: .weekdays, today: 9) == 5)
+    @Test func daysWithNoAlarmRingingDontBreakIt() {
+        // No pass and nothing missed on the 4th (no alarm, a skip, or an
+        // alarm turned off): it neither counts nor breaks the streak.
+        #expect(streak(passes: [2, 3, 5]) == 3)
     }
 
-    @Test func skippedDaysDontBreakIt() {
-        #expect(streak(passes: [3, 5], skipped: [4]) == 2)
+    @Test func turningAlarmsOffLaterChangesNothing() {
+        // The streak only reads what happened, so the same passes and misses
+        // give the same answer whatever alarms are on now.
+        let before = streak(passes: [1, 2, 3, 4, 5])
+        #expect(before == 5)
+        #expect(streak(passes: [1, 2, 3, 4, 5]) == before)
+    }
+
+    @Test func aPassWinsOverAMissTheSameDay() {
+        // Up with the 6:45 alarm, then a later alarm that day went unanswered.
+        #expect(streak(passes: [4, 5], missed: [5]) == 2)
     }
 
     @Test func noPassesIsZero() {
         #expect(streak(passes: []) == 0)
+        #expect(streak(passes: [], missed: [4]) == 0)
     }
 }
