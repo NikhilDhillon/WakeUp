@@ -10,6 +10,8 @@ struct MissionsView: View {
     @Query private var alarms: [WakeAlarm]
     @State private var editing: EditorTarget?
     @State private var pendingDelete: [Mission] = []
+    /// A dry run of the morning photo check with one proof.
+    @State private var testing: TestRun?
 
     var body: some View {
         List {
@@ -55,6 +57,9 @@ struct MissionsView: View {
         } message: {
             Text(deleteMessage)
         }
+        .fullScreenCover(item: $testing) { run in
+            ProofCaptureView(mission: run.mission, challenge: run.challenge, mode: .practice)
+        }
         .sheet(item: $editing) { target in
             NavigationStack {
                 switch target {
@@ -68,6 +73,49 @@ struct MissionsView: View {
     }
 
     private func row(for mission: Mission) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            summary(for: mission)
+            testButton(for: mission)
+                // Lines up with the thumbnail, past the circle.
+                .padding(.leading, 40)
+        }
+        .padding(.vertical, 4)
+    }
+
+    /// Runs the real photo check against this proof without any alarm.
+    private func testButton(for mission: Mission) -> some View {
+        let problem = testProblem(for: mission)
+        return VStack(alignment: .leading, spacing: 4) {
+            Button {
+                testing = TestRun(mission: mission, challenge: .random())
+            } label: {
+                Label("Test this proof", systemImage: "camera.viewfinder")
+                    .font(.subheadline.weight(.semibold))
+                    // The fill cyan is too light for words; use the text cyan.
+                    .foregroundStyle(problem == nil ? Theme.accentText : Color.secondary)
+                    .frame(minHeight: 36)
+            }
+            .buttonStyle(.bordered)
+            .tint(.accentColor)
+            .disabled(problem != nil)
+            .accessibilityHint("Take a photo now and see if the alarm would accept it. Doesn't touch your alarms.")
+
+            if let problem {
+                Text(problem)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// Why a test can't run yet, or nil when it can.
+    private func testProblem(for mission: Mission) -> String? {
+        if !mission.isReady { return "Add reference photos to test it." }
+        if !Verifiers.isConfigured { return "Set up how photos are checked (Settings › Developer tools) to test it." }
+        return nil
+    }
+
+    private func summary(for mission: Mission) -> some View {
         HStack(spacing: 12) {
             Button {
                 activeMissionID = mission.id.uuidString
@@ -131,6 +179,13 @@ struct MissionsView: View {
         if removedActive {
             activeMissionID = missions.first { m in !removed.contains { $0.id == m.id } }?.id.uuidString ?? ""
         }
+    }
+
+    struct TestRun: Identifiable {
+        let mission: Mission
+        /// Picked once per test, so redraws don't swap it.
+        let challenge: Challenge
+        let id = UUID()
     }
 
     enum EditorTarget: Identifiable {

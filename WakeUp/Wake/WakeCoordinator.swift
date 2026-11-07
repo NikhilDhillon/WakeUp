@@ -91,7 +91,8 @@ final class WakeCoordinator {
             followUpDelay: isTest ? 0 : (spec?.followUpDelay ?? 0),
             offline: offline && !isTest
         )
-        if !wasFollowUp {
+        // A quick test isn't a real morning.
+        if !wasFollowUp, !isTest {
             lastPassed = now
             UserDefaults.standard.set(now, forKey: lastPassedKey)
         }

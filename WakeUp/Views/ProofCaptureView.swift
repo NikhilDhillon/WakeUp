@@ -37,7 +37,7 @@ struct ProofCaptureView: View {
         case failed(Data, String)
     }
 
-    private var thresholds: ProofThresholds { AppSettings.strictness.thresholds }
+    private var thresholds: ProofThresholds { AppSettings.strictnessThresholds }
 
     var body: some View {
         ZStack {
@@ -59,7 +59,7 @@ struct ProofCaptureView: View {
             }
             Button("Cancel", role: .cancel) { noticePhoto = nil }
         } message: {
-            Text("To check you're up, WakeUp sends this photo and your reference photos to OpenAI (or the service set in Settings). WakeUp doesn't keep the photo. You can choose the on-phone check in Settings instead, which sends nothing.")
+            Text("To check you're up, WakeUp sends this photo and your reference photos to OpenAI (or the WakeUp service, if you chose one). WakeUp doesn't keep the photo. You can choose the on-phone check in Settings › Developer tools instead, which sends nothing.")
         }
     }
 
@@ -120,7 +120,7 @@ struct ProofCaptureView: View {
                     .font(.headline)
                 Label(challenge.instruction, systemImage: challenge.symbol)
                     .font(.subheadline)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Color.accentColor)
             }
             Spacer()
             Button {
@@ -317,10 +317,15 @@ struct ProofCaptureView: View {
     }
 
     /// Saves the attempt for the History screen, and counts a failure
-    /// against this morning. Practice runs aren't kept.
+    /// against this morning. Practice runs and Developer tools' quick tests
+    /// aren't kept, so they never show in History or count for the streak.
     private func record(_ verdict: Verdict, seconds: Double, small: Data) {
         guard mode != .practice else { return }
         let passed = verdict.passes(using: thresholds)
+        guard WakeCoordinator.shared.activeChain?.kind != .test else {
+            if !passed { WakeCoordinator.shared.proofFailed() }
+            return
+        }
         let thumbnail = keepThumbnails ? ImageResizer.jpegData(from: small, maxDimension: 200) : nil
         context.insert(ProofAttempt(
             date: .now,
@@ -330,7 +335,9 @@ struct ProofCaptureView: View {
             verdict: verdict,
             passed: passed,
             duration: seconds,
-            thumbnail: thumbnail
+            thumbnail: thumbnail,
+            // The first ring of the chain this photo is answering.
+            alarmTime: WakeCoordinator.shared.activeChain?.start
         ))
         if !passed { WakeCoordinator.shared.proofFailed() }
     }
