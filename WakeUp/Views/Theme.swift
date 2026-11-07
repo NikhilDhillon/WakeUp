@@ -8,7 +8,7 @@ enum Theme {
     static let ground = Color("Ground")
     static let card = Color("Card")
     static let inkSecondary = Color("InkSecondary")
-    /// Orange for **text**. The fill orange (`AccentColor`) fails contrast as text.
+    /// Cyan for **text**. The fill cyan (`AccentColor`) fails contrast as text.
     static let accentText = Color("AccentText")
     /// Shapes only (dots, bars), never words.
     static let ready = Color("Ready")
