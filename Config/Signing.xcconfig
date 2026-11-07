@@ -1,0 +1,8 @@
+// Code signing for WakeUp.
+//
+// The Apple team ID is personal, so it's kept out of the repo. To build on
+// your own iPhone, copy Signing.local.xcconfig.example to
+// Signing.local.xcconfig (git-ignored) and put your team ID in it, or pick a
+// team under Signing & Capabilities in Xcode.
+
+#include? "Signing.local.xcconfig"

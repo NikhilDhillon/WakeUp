@@ -31,3 +31,6 @@ PLAN.md
 HANDOFF.md
 docs/REDESIGN.md
 docs/redesign/
+
+# Personal code-signing team (see Config/Signing.local.xcconfig.example)
+Config/Signing.local.xcconfig
