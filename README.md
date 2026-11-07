@@ -111,7 +111,7 @@ To let other people use it without their own key, deploy [proxy/](proxy/README.m
 
 1. Open `WakeUp.xcodeproj` in Xcode.
 2. Plug in your iPhone and pick it as the run destination.
-3. Under **Signing & Capabilities**, the team is set to your Personal Team. If Xcode complains about the bundle ID, change `com.nikhildhillon.WakeUp` to something unique.
+3. Set your Apple team: copy `Config/Signing.local.xcconfig.example` to `Config/Signing.local.xcconfig` and put your team ID in it (the real file is git-ignored), or pick your team under **Signing & Capabilities**. If Xcode complains about the bundle ID, change `com.nikhildhillon.WakeUp` to something unique.
 4. Press Run. The first time, on the iPhone go to **Settings > General > VPN & Device Management**, trust your developer certificate, then turn on **Developer Mode** if asked.
 
 With a free Apple ID, the app stops opening after 7 days. Run it from Xcode again to reinstall it.
@@ -178,8 +178,13 @@ WakeUp/
     MissionEditorView.swift  Create or edit a proof
     WakeView.swift         The Bedside wake screen
 Config/Info.plist          Permission messages (alarms, camera, photos)
+Config/Signing.xcconfig    Code signing; your team goes in the git-ignored Signing.local.xcconfig
 ```
 
 ## API keys
 
 The OpenAI key is typed into the app (setup, or Settings › Developer tools) and kept in the iPhone Keychain (this device only). It's never committed to this repo. Photos are sent to OpenAI only during a check, with `store: false`.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
