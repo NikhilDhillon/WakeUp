@@ -1,8 +1,8 @@
 import AlarmKit
 import SwiftUI
 
-/// Tools for trying the alarm and looking inside it. Switch them on in
-/// Settings > Developer.
+/// How photos are checked, plus tools for trying the alarm and looking
+/// inside it. Switch them on in Settings > Developer tools.
 struct DeveloperView: View {
     @State private var alarmService = AlarmService.shared
     @State private var coordinator = WakeCoordinator.shared
@@ -12,6 +12,9 @@ struct DeveloperView: View {
 
     var body: some View {
         Form {
+            // How photos are checked: method, OpenAI key, offline backup.
+            PhotoCheckSettings()
+
             Section {
                 Stepper("Alarms in chain: \(testCount)", value: $testCount, in: 1...10)
                 Stepper("Every \(testIntervalMinutes) min", value: $testIntervalMinutes, in: 1...5)

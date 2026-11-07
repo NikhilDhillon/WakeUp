@@ -28,6 +28,54 @@ enum Strictness: String, CaseIterable, Identifiable {
 extension Strictness {
     /// The bar for each check at this level.
     var thresholds: ProofThresholds { ProofThresholds(base: threshold) }
+
+    /// The level as a slider percentage (50, 70 or 85).
+    var percent: Int { Int((threshold * 100).rounded()) }
+}
+
+/// The strictness slider in Settings: how sure the AI must be, in whole
+/// percent. Lower than 50% would let the wrong room or a photo of a screen
+/// pass, so the slider stops there.
+enum StrictnessSlider {
+    static let key = "strictnessPercent"
+    static let range = 50...95
+    static let step = 5
+    static let defaultPercent = Strictness.normal.percent
+
+    /// Snaps to a 5% step inside the range.
+    static func clamped(_ percent: Int) -> Int {
+        let snapped = Int((Double(percent) / Double(step)).rounded()) * step
+        return min(max(snapped, range.lowerBound), range.upperBound)
+    }
+
+    /// The saved percentage, or the old named level carried over, or Normal.
+    static func percent(saved: Int?, legacy: String?) -> Int {
+        if let saved { return clamped(saved) }
+        if let legacy, let level = Strictness(rawValue: legacy) { return level.percent }
+        return defaultPercent
+    }
+
+    /// A word for where the slider sits.
+    static func name(for percent: Int) -> String {
+        switch percent {
+        case ..<60: "Lenient"
+        case ..<80: "Normal"
+        case ..<95: "Strict"
+        default: "Very strict"
+        }
+    }
+
+    static func thresholds(percent: Int) -> ProofThresholds {
+        ProofThresholds(base: Double(clamped(percent)) / 100)
+    }
+
+    /// Before the slider, strictness was saved as a word. Turn that into a
+    /// percentage once, so the slider starts where the old setting was.
+    static func migrateIfNeeded(_ defaults: UserDefaults = .standard) {
+        guard defaults.object(forKey: key) == nil else { return }
+        let legacy = defaults.string(forKey: AppSettings.strictnessKey)
+        defaults.set(percent(saved: nil, legacy: legacy), forKey: key)
+    }
 }
 
 /// Which OpenAI API checks the photo.
@@ -138,7 +186,17 @@ enum AppSettings {
         UserDefaults.standard.string(forKey: checkMethodKey).flatMap(CheckMethod.init(rawValue:)) ?? .decisions
     }
 
-    static var strictness: Strictness {
-        UserDefaults.standard.string(forKey: strictnessKey).flatMap(Strictness.init(rawValue:)) ?? .normal
+    /// The strictness slider's value, 50–95.
+    static var strictnessPercent: Int {
+        let defaults = UserDefaults.standard
+        return StrictnessSlider.percent(
+            saved: defaults.object(forKey: StrictnessSlider.key) as? Int,
+            legacy: defaults.string(forKey: strictnessKey)
+        )
+    }
+
+    /// The bar each check must clear, from the strictness slider.
+    static var strictnessThresholds: ProofThresholds {
+        StrictnessSlider.thresholds(percent: strictnessPercent)
     }
 }

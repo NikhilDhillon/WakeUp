@@ -47,9 +47,9 @@ enum VerifierError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .missingAPIKey:
-            "Add your OpenAI key in Settings to turn on the AI check."
+            "Add your OpenAI key in Settings › Developer tools to turn on the AI check."
         case .invalidAPIKey:
-            "OpenAI didn't accept the API key. Check it in Settings."
+            "OpenAI didn't accept the API key. Check it in Settings › Developer tools."
         case .rateLimited(let message):
             "OpenAI is limiting requests or your credits ran out. \(message)"
         case .badRequest(let message):

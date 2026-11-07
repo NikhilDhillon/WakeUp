@@ -79,7 +79,7 @@ struct MissionEditorView: View {
                 } footer: {
                     Text(Verifiers.isConfigured
                         ? "Take a photo now and see what the AI says. Doesn't touch your alarms. Uses the saved version of this proof."
-                        : "Set up how photos are checked in Settings to practice.")
+                        : "Set up how photos are checked (Settings › Developer tools) to practice.")
                 }
             }
         }

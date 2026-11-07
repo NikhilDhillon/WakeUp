@@ -213,7 +213,7 @@ struct WakeView: View {
         if !(mission?.isReady ?? false) {
             return "There's no proof set up, so nothing can be checked."
         }
-        return "Photos can't be checked yet: add an OpenAI key, a service address or the on-phone check in Settings."
+        return "Photos can't be checked yet: add an OpenAI key, a service address or the on-phone check in Settings › Developer tools."
     }
 
     // MARK: Brightness

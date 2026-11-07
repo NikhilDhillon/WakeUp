@@ -7,14 +7,19 @@ struct WakeUpApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @State private var coordinator = WakeCoordinator.shared
     @State private var alarmService = AlarmService.shared
+    @AppStorage(AppAppearance.key) private var appearance = AppAppearance.system.rawValue
 
     init() {
+        // Carry the old Lenient/Normal/Strict choice over to the slider.
+        StrictnessSlider.migrateIfNeeded()
         BackgroundRefresh.register()
     }
 
     var body: some Scene {
         WindowGroup {
             HomeView()
+                // Light, dark or the phone's setting (Settings › Appearance).
+                .preferredColorScheme(AppAppearance.from(appearance).colorScheme)
                 .fullScreenCover(isPresented: $coordinator.isShowingProof) {
                     WakeView()
                 }

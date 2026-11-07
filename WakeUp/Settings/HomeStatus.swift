@@ -5,7 +5,7 @@ enum StatusAction: Equatable, Sendable {
     case retry
     case openSystemSettings
     case chooseProof
-    case openAppSettings
+    case setUpPhotoCheck
     case showDetails
     case requestAuthorization
 
@@ -14,7 +14,7 @@ enum StatusAction: Equatable, Sendable {
         case .retry: "Retry"
         case .openSystemSettings: "Open Settings"
         case .chooseProof: "Choose"
-        case .openAppSettings: "Set up"
+        case .setUpPhotoCheck: "Set up"
         case .showDetails: "Details"
         case .requestAuthorization: "Allow"
         }
@@ -119,7 +119,7 @@ struct HomeStatus: Equatable, Sendable {
         case .noProof:
             StatusProblem(id: warning.id, title: "Choose a place", detail: warning.message, action: .chooseProof)
         case .cannotCheckPhoto:
-            StatusProblem(id: warning.id, title: "Photo check isn't set up", detail: warning.message, action: .openAppSettings)
+            StatusProblem(id: warning.id, title: "Photo check isn't set up", detail: warning.message, action: .setUpPhotoCheck)
         case .lowBattery:
             StatusProblem(id: warning.id, title: "Battery low, plug in tonight", detail: warning.message, action: nil)
         case .buildExpiring(let days):

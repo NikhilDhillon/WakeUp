@@ -73,8 +73,13 @@ struct ProofThresholds: Equatable, Sendable {
         ProofThresholds(base: value, offsets: [:])
     }
 
+    /// An offset never pushes a bar above this: the AI almost never says
+    /// 100%, so at 95% strictness the place check (+5) would never pass.
+    static let highestOffsetBar = 0.97
+
     func threshold(for check: ProofCheck) -> Double {
-        min(max(base + (offsets[check] ?? 0), 0), 1)
+        let raised = min(base + (offsets[check] ?? 0), max(base, Self.highestOffsetBar))
+        return min(max(raised, 0), 1)
     }
 }
 
