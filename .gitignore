@@ -31,6 +31,7 @@ PLAN.md
 HANDOFF.md
 docs/REDESIGN.md
 docs/redesign/
+docs/NAP_TIMER.md
 
 # Personal code-signing team (see Config/Signing.local.xcconfig.example)
 Config/Signing.local.xcconfig
