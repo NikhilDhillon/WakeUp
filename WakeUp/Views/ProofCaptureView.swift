@@ -10,6 +10,8 @@ struct ProofCaptureView: View {
         case wake
         /// The "Still up?" check after a pass.
         case followUp
+        /// A nap's check, and its "Still at your desk?" check.
+        case nap
         case practice
     }
 
@@ -316,6 +318,14 @@ struct ProofCaptureView: View {
         }
     }
 
+    private var attemptKind: AttemptKind {
+        switch mode {
+        case .nap: .nap
+        case .followUp: .followUp
+        case .wake, .practice: .wake
+        }
+    }
+
     /// Saves the attempt for the History screen, and counts a failure
     /// against this morning. Practice runs and Developer tools' quick tests
     /// aren't kept, so they never show in History or count for the streak.
@@ -329,7 +339,7 @@ struct ProofCaptureView: View {
         let thumbnail = keepThumbnails ? ImageResizer.jpegData(from: small, maxDimension: 200) : nil
         context.insert(ProofAttempt(
             date: .now,
-            kind: mode == .followUp ? .followUp : .wake,
+            kind: attemptKind,
             missionName: mission.name,
             challenge: challenge.instruction,
             verdict: verdict,

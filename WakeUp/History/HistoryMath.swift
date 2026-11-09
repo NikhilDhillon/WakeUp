@@ -66,7 +66,8 @@ enum HistoryMath {
 
     /// One summary per day that had attempts, newest first.
     static func summaries(of attempts: [AttemptInfo], calendar: Calendar = .current) -> [MorningSummary] {
-        Dictionary(grouping: attempts) { calendar.startOfDay(for: $0.date) }
+        // Naps are mornings' opposite: a day with only a nap isn't a morning.
+        Dictionary(grouping: attempts.filter { $0.kind != .nap }) { calendar.startOfDay(for: $0.date) }
             .map { day, items in
                 let main = items.filter { $0.kind == .wake }.sorted { $0.date < $1.date }
                 let followUps = items.filter { $0.kind == .followUp }
@@ -82,6 +83,58 @@ enum HistoryMath {
                 )
             }
             .sorted { $0.day > $1.day }
+    }
+
+    /// One finished nap, as its History row.
+    struct NapSummary: Equatable, Identifiable, Sendable {
+        var id: UUID
+        var startedAt: Date
+        var minutes: Int
+        var snoozes: Int
+        /// When a proof passed; nil = the nap rang out unanswered.
+        var upAt: Date?
+        /// Photos it took, including the one that passed.
+        var tries: Int
+    }
+
+    /// Finished naps, newest first. A nap's tries are the nap photos taken
+    /// from its start until it ended (or until the next nap began).
+    static func napSummaries(records: [NapRecord], attempts: [AttemptInfo]) -> [NapSummary] {
+        let napAttempts = attempts.filter { $0.kind == .nap }
+        let ordered = records.sorted { $0.startedAt < $1.startedAt }
+        return ordered.enumerated().map { index, record in
+            let nextStart = index + 1 < ordered.count ? ordered[index + 1].startedAt : .distantFuture
+            let end = record.upAt ?? .distantFuture
+            let tries = napAttempts.filter { $0.date >= record.startedAt && $0.date < nextStart && $0.date <= end }.count
+            return NapSummary(
+                id: record.id,
+                startedAt: record.startedAt,
+                minutes: max(Int((record.duration / 60).rounded()), 1),
+                snoozes: record.snoozesUsed,
+                upAt: record.upAt,
+                tries: tries
+            )
+        }
+        .sorted { $0.startedAt > $1.startedAt }
+    }
+
+    /// "Nap · 20 min · snoozed twice · up at 4:04 PM, 1 try".
+    static func napLine(_ nap: NapSummary, locale: Locale = .current) -> String {
+        var parts = ["Nap", "\(nap.minutes) min"]
+        switch nap.snoozes {
+        case 0: break
+        case 1: parts.append("snoozed once")
+        case 2: parts.append("snoozed twice")
+        default: parts.append("snoozed \(nap.snoozes) times")
+        }
+        if let upAt = nap.upAt {
+            parts.append("up at " + upAt.formatted(.dateTime.hour().minute().locale(locale)))
+        } else {
+            parts.append("not up")
+        }
+        let line = parts.joined(separator: " · ")
+        guard nap.tries > 0 else { return line }
+        return line + ", " + (nap.tries == 1 ? "1 try" : "\(nap.tries) tries")
     }
 
     /// An alarm's time of day and days, for guessing which one a photo answered.

@@ -1,4 +1,5 @@
 import AlarmKit
+import SwiftData
 import SwiftUI
 
 /// How photos are checked, plus tools for trying the alarm and looking
@@ -8,6 +9,9 @@ struct DeveloperView: View {
     @State private var coordinator = WakeCoordinator.shared
     @State private var testCount = 3
     @State private var testIntervalMinutes = 1
+    @Query(sort: \Mission.createdAt) private var missions: [Mission]
+    @AppStorage(ActiveMission.key) private var activeMissionID = ""
+    @State private var quickNapMessage: String?
     @State private var morningTime = Calendar.current.date(from: DateComponents(hour: 7, minute: 0)) ?? .now
 
     var body: some View {
@@ -31,6 +35,20 @@ struct DeveloperView: View {
                 Text("Quick test")
             } footer: {
                 Text("Lock the phone and wait. When it rings, tap \"Prove I'm up\". The app should open and the next alarm in the chain should still ring.")
+            }
+
+            Section {
+                Button("Quick nap") {
+                    Task { await startQuickNap() }
+                }
+                .disabled(alarmService.nap != nil)
+                if let quickNapMessage {
+                    Text(quickNapMessage).font(.footnote).foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Nap")
+            } footer: {
+                Text("Rings in 1 minute with 3 rings 1 minute apart and 2 snoozes of 1 minute, using your default proof. Lock the phone, press Stop to snooze, and check each step of the nap plan.")
             }
 
             Section {
@@ -100,6 +118,19 @@ struct DeveloperView: View {
         }
         .navigationTitle("Developer")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func startQuickNap() async {
+        let mission = ActiveMission.resolve(id: activeMissionID, in: missions)
+        let nap = NapSession.make(
+            now: .now, minutes: 1, missionID: mission?.id.uuidString, proofName: mission?.name ?? "",
+            chainLength: 3, chainIntervalMinutes: 1, followUpMinutes: 0, snoozes: 2, snoozeMinutes: 1, allowShort: true
+        )
+        switch await alarmService.startNap(nap) {
+        case .started: quickNapMessage = "Nap started: rings at \(nap.ringsAt.formatted(date: .omitted, time: .shortened))."
+        case .tooManyAlarms(let fit): quickNapMessage = "iOS only has room for \(fit) alarms right now."
+        case .failed(let reason): quickNapMessage = reason
+        }
     }
 
     private var sortedAlarms: [Alarm] {

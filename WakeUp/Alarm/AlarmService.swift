@@ -34,6 +34,14 @@ final class AlarmService {
     /// While a proof photo is being taken on the last ring, the extra ring
     /// waits until this time.
     private var repeatHoldUntil: Date?
+    /// Rings silenced by "Prove I'm up" a moment ago. If stopping one also
+    /// runs the Stop button's intent, that must not count as a snooze.
+    private var silencedRings: [UUID: Date] = [:]
+
+    /// Greater than 0 while a nap is being started, snoozed or handed to its
+    /// follow-up, so cleanup doesn't mistake the gap between chains for a
+    /// nap that ended.
+    private var napBusyCount = 0
 
     private let learnedLimitKey = "alarmKit.learnedSlotLimit"
 
@@ -60,6 +68,9 @@ final class AlarmService {
     var isRinging: Bool {
         alarms.contains { $0.state == .alerting }
     }
+
+    /// A nap is being started or snoozed right now: the chains are in flux.
+    var isNapBusy: Bool { napBusyCount > 0 }
 
     /// How many alarms iOS accepted before it said no, once it has said so.
     var learnedSlotLimit: Int? {
@@ -140,6 +151,7 @@ final class AlarmService {
             store.remove(chainID: chain.id)
         }
         cancelStrays()
+        finishNapIfGone(now: now)
         chains = store.chains
 
         for planned in plan.create {
@@ -168,12 +180,26 @@ final class AlarmService {
 
     /// Schedules the "Still up?" chain after a pass.
     func scheduleFollowUp(for spec: AlarmSpec, delay: TimeInterval, now: Date = .now) async {
+        await scheduleFollowUp(
+            alarmID: spec.id, delay: delay, interval: spec.chainInterval, sound: spec.sound,
+            signature: SchedulePlanner.signature(of: spec), now: now
+        )
+    }
+
+    /// Schedules the follow-up chain for any alarm or nap. `proofName` is
+    /// set for naps, whose follow-up asks "Still at your desk?".
+    func scheduleFollowUp(
+        alarmID: UUID, delay: TimeInterval, interval: TimeInterval, sound: String, signature: String,
+        proofName: String? = nil, now: Date = .now
+    ) async {
+        napBusyCount += 1
+        defer { napBusyCount -= 1 }
         guard await ensureAuthorized(prompt: false) else { return }
         let start = now.addingTimeInterval(max(delay, 60))
         _ = await schedule(
-            alarmID: spec.id, kind: .followUp, day: Calendar.current.startOfDay(for: now), start: start,
-            count: AlarmSpec.followUpChainLength, interval: max(spec.chainInterval, 120),
-            signature: SchedulePlanner.signature(of: spec), sound: spec.sound
+            alarmID: alarmID, kind: .followUp, day: Calendar.current.startOfDay(for: now), start: start,
+            count: AlarmSpec.followUpChainLength, interval: max(interval, 120),
+            signature: signature, sound: sound, proofName: proofName
         )
         chains = store.chains
     }
@@ -191,7 +217,8 @@ final class AlarmService {
 
     private func schedule(
         alarmID: UUID, kind: ScheduledChain.Kind, day: Date, start: Date,
-        count: Int, interval: TimeInterval, signature: String, sound: String = AlarmSound.standard.rawValue
+        count: Int, interval: TimeInterval, signature: String, sound: String = AlarmSound.standard.rawValue,
+        proofName: String? = nil, noSnoozesLeft: Bool = false
     ) async -> (chain: ScheduledChain?, hitLimit: Bool) {
         let chainID = UUID()
         var scheduled: [UUID] = []
@@ -206,7 +233,10 @@ final class AlarmService {
                 let next = index < count - 1 ? fireDate.addingTimeInterval(interval) : nil
                 let configuration = AlarmManager.AlarmConfiguration<WakeAlarmMetadata>(
                     schedule: .fixed(fireDate),
-                    attributes: Self.attributes(kind: kind, chainID: chainID, index: index, count: count, next: next),
+                    attributes: Self.attributes(
+                        kind: kind, chainID: chainID, index: index, count: count, next: next,
+                        proof: proofName, noSnoozesLeft: noSnoozesLeft
+                    ),
                     // Stop says when the next ring comes, or brings the last one back.
                     stopIntent: RingStoppedIntent(chainID: chainID.uuidString, alarmID: id.uuidString),
                     secondaryIntent: ProveAwakeIntent(alarmID: id.uuidString),
@@ -265,6 +295,7 @@ final class AlarmService {
         store.clear()
         chains = []
         refresh()
+        WakeCoordinator.shared.napEnded()
     }
 
     /// Silences the alarm that's ringing right now without cancelling the
@@ -278,6 +309,7 @@ final class AlarmService {
             // button's intent: that re-ring must wait for the photo too.
             repeatHoldUntil = now.addingTimeInterval(ScheduledChain.ringAgainAfterProof)
         }
+        silencedRings[alarmID] = now.addingTimeInterval(10)
         try? manager.stop(id: alarmID)
         refresh()
         if let lastRingChain {
@@ -285,10 +317,25 @@ final class AlarmService {
         }
     }
 
+    /// The sound and gap a chain's alarm uses: the saved nap's, or the
+    /// saved alarm's. nil when neither exists any more.
+    func ringSettings(for chain: ScheduledChain) -> RingSettings? {
+        RingSettings.resolve(alarmID: chain.alarmID, nap: store.nap, spec: store.spec(for: chain.alarmID))
+    }
+
     /// Stop was pressed on a ring: say when the next one comes, or, on the
-    /// last ring, bring it back and say when.
+    /// last ring, bring it back and say when. On a nap with snoozes left,
+    /// Stop is the snooze button instead.
     func ringStopped(chainID: UUID, alarmID: UUID, now: Date = .now) async {
         guard let chain = store.chains.first(where: { $0.id == chainID }) else { return }
+        let wasSilenced = silencedRings[alarmID].map { $0 > now } ?? false
+        silencedRings = silencedRings.filter { $0.value > now }
+        if chain.kind == .nap, !wasSilenced, let nap = store.nap, nap.id == chain.alarmID, nap.snoozesLeft > 0 {
+            // A snooze that can't be scheduled puts the old rings back
+            // itself, so there's nothing more to do either way.
+            await snoozeNap(now: now, stopped: alarmID)
+            return
+        }
         if chain.isLastRing(alarmID) {
             await ringAgain(chainID: chainID, after: ScheduledChain.ringAgainAfterStop, now: now)
             if let again = store.chains.first(where: { $0.id == chainID })?.repeatRing {
@@ -309,14 +356,17 @@ final class AlarmService {
 
         let fireDate = ScheduledChain.repeatFireDate(now: now, delay: delay, holdUntil: repeatHoldUntil)
         let count = max(chain.slotIDs.count, 1)
-        let sound = store.spec(for: chain.alarmID)?.sound ?? AlarmSound.standard.rawValue
+        let sound = ringSettings(for: chain)?.sound ?? AlarmSound.standard.rawValue
+        let proof = chain.belongsToNap ? store.nap?.proofName : nil
         let id = UUID()
         inFlight.insert(id)
         defer { inFlight.remove(id) }
 
         let configuration = AlarmManager.AlarmConfiguration<WakeAlarmMetadata>(
             schedule: .fixed(fireDate),
-            attributes: Self.attributes(kind: chain.kind, chainID: chain.id, index: count - 1, count: count, next: nil),
+            attributes: Self.attributes(
+                kind: chain.kind, chainID: chain.id, index: count - 1, count: count, next: nil, proof: proof
+            ),
             stopIntent: RingStoppedIntent(chainID: chain.id.uuidString, alarmID: id.uuidString),
             secondaryIntent: ProveAwakeIntent(alarmID: id.uuidString),
             sound: Self.alertSound(named: sound)
@@ -345,6 +395,182 @@ final class AlarmService {
         refresh()
     }
 
+    // MARK: - Naps
+
+    enum NapStartResult: Equatable {
+        case started
+        /// iOS accepted only `fit` of the nap's rings. A nap with that many rings would work.
+        case tooManyAlarms(fit: Int)
+        case failed(String)
+    }
+
+    /// The nap that's set, if any.
+    var nap: NapSession? { store.nap }
+
+    /// Starts a nap: cancels any earlier one, saves it, and schedules its
+    /// chain at `nap.ringsAt`. A nap must never fail to ring without saying so.
+    func startNap(_ nap: NapSession) async -> NapStartResult {
+        guard await ensureAuthorized(prompt: true) else {
+            return .failed(lastError ?? "Alarms aren't allowed. Turn them on in Settings > WakeUp.")
+        }
+        napBusyCount += 1
+        defer { napBusyCount -= 1 }
+
+        let earlier = store.nap
+        for chain in store.chains where chain.kind == .nap || (earlier != nil && chain.alarmID == earlier?.id) {
+            cancelSlots(of: chain)
+            store.remove(chainID: chain.id)
+        }
+        store.nap = nap
+        let result = await schedule(
+            alarmID: nap.id, kind: .nap, day: Calendar.current.startOfDay(for: nap.ringsAt), start: nap.ringsAt,
+            count: nap.chainLength, interval: nap.chainInterval, signature: NapSession.signature,
+            sound: nap.sound, proofName: nap.proofName
+        )
+        chains = store.chains
+
+        if let chain = result.chain, chain.slotIDs.count == nap.chainLength {
+            RingNotice.clear()
+            refresh()
+            return .started
+        }
+        // Some or none of the rings were accepted. A half-built nap would
+        // ring and then go quiet, so none of it is kept.
+        let fit = result.chain?.slotIDs.count ?? 0
+        if let partial = result.chain {
+            cancelSlots(of: partial)
+            store.remove(chainID: partial.id)
+        }
+        store.nap = nil
+        refresh()
+        if result.hitLimit, fit > 0 { return .tooManyAlarms(fit: fit) }
+        return .failed(lastError ?? "Couldn't start the nap.")
+    }
+
+    /// Cancels the nap and its chain. Refused once it has rung.
+    @discardableResult
+    func cancelNap(now: Date = .now) -> Bool {
+        guard let nap = store.nap, nap.canCancel(at: now) else { return false }
+        for chain in store.chains where chain.alarmID == nap.id { cancel(chain) }
+        store.nap = nil
+        refresh()
+        WakeCoordinator.shared.napEnded()
+        return true
+    }
+
+    /// Snoozes the nap: the whole chain starts again at now + the snooze
+    /// length. The new count is saved before anything is scheduled, so a
+    /// second Stop in a hurry finds the old chain gone and uses nothing.
+    /// `stopped` is the ring whose Stop was pressed, if any.
+    @discardableResult
+    func snoozeNap(now: Date = .now, stopped: UUID? = nil) async -> Bool {
+        guard let nap = store.nap,
+              let updated = nap.snoozed(at: now),
+              let old = store.chains.first(where: { $0.kind == .nap && $0.alarmID == nap.id }),
+              authorization == .authorized
+        else { return false }
+
+        napBusyCount += 1
+        defer { napBusyCount -= 1 }
+
+        // Nothing below awaits until the new count is saved.
+        cancelSlots(of: old)
+        store.remove(chainID: old.id)
+        store.nap = updated
+        chains = store.chains
+
+        let result = await schedule(
+            alarmID: nap.id, kind: .nap, day: Calendar.current.startOfDay(for: updated.ringsAt),
+            start: updated.ringsAt, count: updated.chainLength, interval: updated.chainInterval,
+            signature: NapSession.signature, sound: updated.sound, proofName: updated.proofName,
+            noSnoozesLeft: updated.usedAllSnoozes
+        )
+
+        if let chain = result.chain, chain.slotIDs.count == updated.chainLength {
+            refresh()
+            WakeCoordinator.shared.napSnoozed()
+            await RingNotice.postSnoozed(until: updated.ringsAt, snoozesLeft: updated.snoozesLeft)
+            return true
+        }
+
+        // iOS refused the new chain. A snooze can never end with nothing
+        // ringing, so the old chain's remaining rings go back and the snooze
+        // isn't counted.
+        if let partial = result.chain {
+            cancelSlots(of: partial)
+            store.remove(chainID: partial.id)
+        }
+        var restored = nap
+        restored.hasRung = true
+        store.nap = restored
+        await restoreRemainingRings(of: old, nap: restored, stopped: stopped, now: now)
+        lastError = "Couldn't snooze: iOS refused the new alarms. The nap alarm will keep ringing."
+        refresh()
+        return false
+    }
+
+    /// Puts back the rings an old nap chain still had to ring. If the ring
+    /// that was stopped was the last one, a single ring comes back.
+    private func restoreRemainingRings(of old: ScheduledChain, nap: NapSession, stopped: UUID?, now: Date) async {
+        let next = stopped.flatMap { old.nextRing(afterStopping: $0) }?.date
+            ?? old.ringPosition(at: now).next
+        var start = now.addingTimeInterval(ScheduledChain.ringAgainAfterStop)
+        var count = 1
+        var ringNumber: Int?
+        if let next, old.interval > 0 {
+            let index = Int((next.timeIntervalSince(old.start) / old.interval).rounded())
+            start = next
+            count = max(old.slotIDs.count - index, 1)
+            ringNumber = index + 1
+        }
+        let result = await schedule(
+            alarmID: nap.id, kind: .nap, day: old.day, start: start, count: count, interval: old.interval,
+            signature: NapSession.signature, sound: nap.sound, proofName: nap.proofName
+        )
+        if let chain = result.chain {
+            await RingNotice.post(next: chain.start, ring: ringNumber, total: ringNumber == nil ? nil : old.slotIDs.count)
+        }
+    }
+
+    /// A proof passed for the nap. The record for History is written now.
+    /// `keepForFollowUp` keeps the nap saved (so the follow-up chain can
+    /// find its sound) until the follow-up chain is gone.
+    func napPassed(at now: Date, keepForFollowUp: Bool) {
+        guard var nap = store.nap else { return }
+        if nap.passedAt == nil {
+            store.addNapRecord(NapRecord(
+                id: nap.id, startedAt: nap.startedAt, duration: nap.duration,
+                snoozesUsed: nap.snoozesUsed, upAt: now
+            ))
+        }
+        if keepForFollowUp {
+            nap.passedAt = now
+            store.nap = nap
+        } else {
+            store.nap = nil
+        }
+    }
+
+    /// The follow-up passed, or the nap was stopped for good.
+    func endNap() {
+        store.nap = nil
+    }
+
+    /// Forgets a nap whose chains are all gone. If it rang out with no
+    /// pass, History gets a record of it. Not for the mornings' streak.
+    private func finishNapIfGone(now: Date) {
+        guard !isNapBusy, let nap = store.nap,
+              !store.chains.contains(where: { $0.alarmID == nap.id })
+        else { return }
+        if nap.passedAt == nil, nap.hasRung || nap.ringsAt <= now {
+            store.addNapRecord(NapRecord(
+                id: nap.id, startedAt: nap.startedAt, duration: nap.duration,
+                snoozesUsed: nap.snoozesUsed, upAt: nil
+            ))
+        }
+        store.nap = nil
+    }
+
     func refresh() {
         alarms = (try? manager.alarms) ?? alarms
         authorization = manager.authorizationState
@@ -370,9 +596,12 @@ final class AlarmService {
     }
 
     private static func attributes(
-        kind: ScheduledChain.Kind, chainID: UUID, index: Int, count: Int, next: Date?
+        kind: ScheduledChain.Kind, chainID: UUID, index: Int, count: Int, next: Date?,
+        proof: String? = nil, noSnoozesLeft: Bool = false
     ) -> AlarmAttributes<WakeAlarmMetadata> {
-        let text = RingNotice.alarmTitle(kind: kind, index: index, count: count, next: next)
+        let text = RingNotice.alarmTitle(
+            kind: kind, index: index, count: count, next: next, proof: proof, noSnoozesLeft: noSnoozesLeft
+        )
         let title: LocalizedStringResource = "\(text)"
         let proveButton = AlarmButton(
             text: "Prove I'm up",

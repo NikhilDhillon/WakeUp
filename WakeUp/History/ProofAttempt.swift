@@ -7,6 +7,9 @@ enum AttemptKind: String, Codable, Sendable {
     case wake
     /// The "Still up?" check after a pass.
     case followUp
+    /// A nap's check (and its "Still at your desk?" check). Never part of a
+    /// morning: it doesn't touch the streak or the morning summaries.
+    case nap
 }
 
 /// One photo check, kept so the History screen can show how mornings went.

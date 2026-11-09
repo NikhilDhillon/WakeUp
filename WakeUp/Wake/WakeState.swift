@@ -8,6 +8,10 @@ import Foundation
 ///           ↑________|_________|   (a follow-up that rings again is just
 ///                                   another ring of the same morning)
 /// ```
+///
+/// A nap uses the same phases, plus `.snoozed`: Stop (or the wake screen's
+/// Snooze button) swaps the nap's chain for a new one that hasn't started,
+/// and `sync` must not read that gap as a nap nobody answered.
 struct WakeState: Codable, Equatable, Sendable {
     enum Phase: String, Codable, Sendable {
         /// Nothing is going on.
@@ -20,6 +24,8 @@ struct WakeState: Codable, Equatable, Sendable {
         case followUpRinging
         /// The morning is finished.
         case done
+        /// A nap was snoozed: its next chain is waiting to start.
+        case snoozed
     }
 
     enum Outcome: String, Codable, Sendable {
@@ -42,6 +48,9 @@ struct WakeState: Codable, Equatable, Sendable {
     var followUpAt: Date?
     var checkedOffline = false
     var lastOutcome: Outcome?
+    /// This is a nap, not a morning: it isn't a missed morning when it
+    /// rings out, and it has its own wording.
+    var isNap = false
 
     /// The proof screen should be showing.
     var isAwaitingProof: Bool {
@@ -57,7 +66,10 @@ struct WakeState: Codable, Equatable, Sendable {
 
         if let followUp = live.filter({ $0.kind == .followUp }).min(by: { $0.start < $1.start }) {
             if phase != .followUpRinging {
-                begin(.followUpRinging, alarmID: followUp.alarmID, morning: followUp.day, avoiding: challenge)
+                begin(
+                    .followUpRinging, alarmID: followUp.alarmID, morning: followUp.day,
+                    avoiding: challenge, isNap: followUp.belongsToNap
+                )
             }
             return
         }
@@ -65,10 +77,20 @@ struct WakeState: Codable, Equatable, Sendable {
         if let main = live.filter({ $0.kind != .followUp }).min(by: { $0.start < $1.start }) {
             switch phase {
             case .idle, .done:
-                begin(.ringing, alarmID: main.alarmID, morning: main.day, avoiding: nil)
+                begin(.ringing, alarmID: main.alarmID, morning: main.day, avoiding: nil, isNap: main.kind == .nap)
             case .passed:
                 // Another alarm's chain began before the follow-up did.
-                if main.alarmID != alarmID { begin(.ringing, alarmID: main.alarmID, morning: main.day, avoiding: challenge) }
+                if main.alarmID != alarmID {
+                    begin(.ringing, alarmID: main.alarmID, morning: main.day, avoiding: challenge, isNap: main.kind == .nap)
+                }
+            case .snoozed:
+                if main.alarmID == alarmID {
+                    // The snoozed nap rings again: same challenge, fresh tries.
+                    phase = .ringing
+                    attempts = 0
+                } else {
+                    begin(.ringing, alarmID: main.alarmID, morning: main.day, avoiding: challenge, isNap: main.kind == .nap)
+                }
             case .ringing, .followUpRinging:
                 break
             }
@@ -77,7 +99,15 @@ struct WakeState: Codable, Equatable, Sendable {
 
         // Nothing is ringing any more.
         switch phase {
-        case .ringing:
+        case .ringing, .snoozed:
+            // A snoozed nap has a new chain waiting to start. That's not a
+            // nap nobody answered.
+            if isNap, chains.contains(where: {
+                $0.kind == .nap && $0.alarmID == alarmID && !$0.isExpired(at: now) && !$0.hasStarted(at: now)
+            }) {
+                phase = .snoozed
+                return
+            }
             // The whole chain rang out with no proof.
             lastOutcome = .missed
             phase = .idle
@@ -140,9 +170,22 @@ struct WakeState: Codable, Equatable, Sendable {
         self = WakeState()
     }
 
-    private mutating func begin(_ phase: Phase, alarmID: UUID, morning: Date, avoiding previous: Challenge?) {
+    /// "I'm up early" on a nap that hasn't rung (or is snoozed): the proof
+    /// screen opens now. A snoozed nap keeps its challenge.
+    mutating func beginNapEarly(alarmID: UUID, day: Date) {
+        if isNap, self.alarmID == alarmID, phase == .ringing || phase == .snoozed {
+            phase = .ringing
+            return
+        }
+        begin(.ringing, alarmID: alarmID, morning: day, avoiding: nil, isNap: true)
+    }
+
+    private mutating func begin(
+        _ phase: Phase, alarmID: UUID, morning: Date, avoiding previous: Challenge?, isNap: Bool = false
+    ) {
         self.phase = phase
         self.alarmID = alarmID
+        self.isNap = isNap
         self.morning = morning
         self.challenge = Challenge.random(excluding: previous)
         self.attempts = 0
@@ -152,6 +195,23 @@ struct WakeState: Codable, Equatable, Sendable {
             checkedOffline = false
             lastOutcome = nil
         }
+    }
+}
+
+extension WakeState {
+    // A state saved by an older build has no `isNap`.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        phase = try c.decodeIfPresent(Phase.self, forKey: .phase) ?? .idle
+        alarmID = try c.decodeIfPresent(UUID.self, forKey: .alarmID)
+        morning = try c.decodeIfPresent(Date.self, forKey: .morning)
+        challenge = try c.decodeIfPresent(Challenge.self, forKey: .challenge)
+        attempts = try c.decodeIfPresent(Int.self, forKey: .attempts) ?? 0
+        passedAt = try c.decodeIfPresent(Date.self, forKey: .passedAt)
+        followUpAt = try c.decodeIfPresent(Date.self, forKey: .followUpAt)
+        checkedOffline = try c.decodeIfPresent(Bool.self, forKey: .checkedOffline) ?? false
+        lastOutcome = try c.decodeIfPresent(Outcome.self, forKey: .lastOutcome)
+        isNap = try c.decodeIfPresent(Bool.self, forKey: .isNap) ?? false
     }
 }
 

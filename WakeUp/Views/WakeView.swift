@@ -19,7 +19,7 @@ struct WakeView: View {
     @ScaledMetric(relativeTo: .largeTitle) private var challengeSize = Theme.wakeChallengeSize
 
     private var mission: Mission? {
-        ActiveMission.resolve(preferred: coordinator.activeSpec?.missionID, fallback: activeMissionID, in: missions)
+        ActiveMission.resolve(preferred: coordinator.activeProofID, fallback: activeMissionID, in: missions)
     }
 
     private var canCheck: Bool {
@@ -41,7 +41,7 @@ struct WakeView: View {
                 ProofCaptureView(
                     mission: mission,
                     challenge: coordinator.challenge,
-                    mode: coordinator.isFollowUp ? .followUp : .wake
+                    mode: coordinator.isNap ? .nap : (coordinator.isFollowUp ? .followUp : .wake)
                 ) { verdict in
                     passed = true
                     passedOffline = verdict.method == .offline
@@ -75,11 +75,16 @@ struct WakeView: View {
         }
         .background(Theme.wakeBackground.ignoresSafeArea())
         .safeAreaInset(edge: .bottom) {
-            bottomBar(position)
+            bottomBar(position, now: now)
         }
     }
 
     private func topLine(_ position: (current: Int, total: Int, next: Date?)?) -> String {
+        if coordinator.isNap {
+            if coordinator.isFollowUp { return "Still at your desk?" }
+            guard let position, position.total > 1, position.current > 1 else { return "Nap's over" }
+            return "Nap's over · ring \(position.current) of \(position.total)"
+        }
         if coordinator.isFollowUp { return "Still up?" }
         guard let position, position.total > 1 else { return "Prove you're up" }
         return "Ring \(position.current) of \(position.total)"
@@ -140,7 +145,7 @@ struct WakeView: View {
 
     // MARK: Buttons
 
-    private func bottomBar(_ position: (current: Int, total: Int, next: Date?)?) -> some View {
+    private func bottomBar(_ position: (current: Int, total: Int, next: Date?)?, now: Date) -> some View {
         VStack(spacing: 10) {
             if canCheck {
                 Button {
@@ -178,6 +183,10 @@ struct WakeView: View {
                 .buttonStyle(.plain)
             }
 
+            if coordinator.canSnooze(now: now), let nap = coordinator.activeNap {
+                snoozeButton(nap)
+            }
+
             Button {
                 coordinator.notYet()
             } label: {
@@ -202,6 +211,34 @@ struct WakeView: View {
         // The buttons stay on screen at the largest text sizes; the challenge above scrolls.
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .background(Theme.wakeBackground)
+    }
+
+    /// "Snooze 10 min" with "1 left" under it. The nap rings again from the
+    /// first ring when the snooze is up.
+    private func snoozeButton(_ nap: NapSession) -> some View {
+        let minutes = Int((nap.snoozeLength / 60).rounded())
+        let left = nap.snoozesLeft
+        return Button {
+            Task { await coordinator.snooze() }
+        } label: {
+            VStack(spacing: 2) {
+                Text("Snooze \(minutes) min")
+                    .font(.headline)
+                Text(left == 1 ? "1 left" : "\(left) left")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.wakeSecondary)
+            }
+            .foregroundStyle(Theme.wakeInk)
+            .frame(maxWidth: .infinity, minHeight: 56)
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .strokeBorder(Theme.wakeInk, lineWidth: 2)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Snooze \(minutes) minutes. \(left) left.")
+        .accessibilityAddTraits(.isButton)
     }
 
     private func nextRingText(_ position: (current: Int, total: Int, next: Date?)?) -> String {

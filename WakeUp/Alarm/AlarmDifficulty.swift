@@ -75,13 +75,18 @@ enum AlarmDifficulty: String, CaseIterable, Identifiable, Sendable {
         return "\(level.title) · \(chainLength) ring\(chainLength == 1 ? "" : "s")"
     }
 
+    /// "Rings 10 times, 3 min apart, until a photo passes."
+    static func ringsSummary(chainLength: Int, intervalMinutes: Int) -> String {
+        chainLength == 1
+            ? "Rings once, until a photo passes."
+            : "Rings \(chainLength) times, \(intervalMinutes) min apart, until a photo passes."
+    }
+
     /// Two short lines under the difficulty controls:
     /// "Rings 10 times, 3 min apart, until a photo passes."
     /// "Checks again 12 min after you pass."
     static func summary(chainLength: Int, intervalMinutes: Int, followUpMinutes: Int) -> String {
-        let rings = chainLength == 1
-            ? "Rings once, until a photo passes."
-            : "Rings \(chainLength) times, \(intervalMinutes) min apart, until a photo passes."
+        let rings = ringsSummary(chainLength: chainLength, intervalMinutes: intervalMinutes)
         let followUp = followUpMinutes > 0
             ? "Checks again \(followUpMinutes) min after you pass."
             : "No check after you pass."

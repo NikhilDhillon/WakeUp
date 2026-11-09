@@ -21,6 +21,7 @@ struct HomeView: View {
     @State private var showingSetup = false
     @State private var showingPlaces = false
     @State private var showingHistory = false
+    @State private var showingNap = false
     @State private var showingStatusDetails = false
     /// The photo check on its own, from the "Photo check isn't set up" banner.
     @State private var showingPhotoCheck = false
@@ -47,6 +48,15 @@ struct HomeView: View {
                     .plainRow(top: 4)
                 }
 
+                if let nap = napSession {
+                    NapCard(
+                        nap: nap,
+                        onUpEarly: { coordinator.proveNapEarly() },
+                        onCancel: { alarmService.cancelNap() }
+                    )
+                    .plainRow(top: 6, bottom: 4)
+                }
+
                 if let cardPick, let alarm = alarms.first(where: { $0.id == cardPick.alarmID }) {
                     NextAlarmCard(
                         alarm: alarm,
@@ -61,6 +71,10 @@ struct HomeView: View {
                     .plainRow(top: 6, bottom: 8)
                 } else {
                     emptyCard.plainRow(top: 6, bottom: 8)
+                }
+
+                if napSession == nil {
+                    napRow.plainRow(top: 2, bottom: 4)
                 }
 
                 if !otherAlarms.isEmpty {
@@ -112,6 +126,14 @@ struct HomeView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
+                        showingNap = true
+                    } label: {
+                        Label("Nap", systemImage: "powersleep")
+                    }
+                    .disabled(napSession != nil)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
                         editing = .new
                     } label: {
                         Image(systemName: "plus")
@@ -132,6 +154,9 @@ struct HomeView: View {
                 hasAPIKey = AppSettings.hasAPIKey
             }) {
                 SettingsView(onRunSetup: { showingSetup = true })
+            }
+            .sheet(isPresented: $showingNap) {
+                NapSheet()
             }
             .sheet(item: $editingDifficulty) { alarm in
                 DifficultySheet(alarm: alarm)
@@ -216,8 +241,18 @@ struct HomeView: View {
             hasAlarms: !alarms.isEmpty,
             hasEnabledAlarm: alarms.contains(where: \.isEnabled),
             nextRing: pick?.ring,
-            now: now
+            now: now,
+            napText: napSession?.statusText(at: now)
         )
+    }
+
+    /// The nap that's set and not yet passed. Reads the saved nap each time
+    /// the view is drawn; the chains and the wake state changing redraw it.
+    private var napSession: NapSession? {
+        _ = alarmService.chains
+        _ = coordinator.state
+        guard let nap = ScheduleStore().nap, nap.passedAt == nil else { return nil }
+        return nap
     }
 
     private var streak: Int {
@@ -261,6 +296,34 @@ struct HomeView: View {
     }
 
     // MARK: Pieces
+
+    /// A quiet row under the Next Up card that starts a nap.
+    private var napRow: some View {
+        Button { showingNap = true } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "powersleep")
+                    .foregroundStyle(Theme.accentText)
+                    .accessibilityHidden(true)
+                Text("Take a nap")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.primary)
+                Text("Timer, stopped by a photo")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.inkSecondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.inkSecondary)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 14)
+            .frame(minHeight: Theme.minTapHeight)
+            .cardBackground(radius: Theme.rowRadius)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Take a nap")
+    }
 
     private var emptyCard: some View {
         VStack(spacing: 12) {

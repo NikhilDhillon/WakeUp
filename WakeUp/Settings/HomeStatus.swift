@@ -53,9 +53,11 @@ struct HomeStatus: Equatable, Sendable {
         hasEnabledAlarm: Bool,
         nextRing: Date?,
         now: Date,
+        napText: String? = nil,
         calendar: Calendar = .current
     ) -> HomeStatus? {
-        guard hasAlarms else { return nil }
+        // A nap is worth a pill even before any alarm exists.
+        guard hasAlarms || napText != nil else { return nil }
 
         var problems: [StatusProblem] = []
         if let lastError {
@@ -72,13 +74,17 @@ struct HomeStatus: Equatable, Sendable {
                 detail: "WakeUp needs your permission to ring alarms.", action: .requestAuthorization
             ))
         }
-        if !hasEnabledAlarm {
+        if hasAlarms, !hasEnabledAlarm {
             problems.append(StatusProblem(
                 id: "noAlarmOn", title: "No alarm is on",
                 detail: "Every alarm is switched off, so nothing will ring.", action: nil
             ))
         }
-        return HomeStatus(problems: problems, readyText: readyText(nextRing: nextRing, now: now, calendar: calendar))
+        // While a nap is set, the pill talks about the nap, not the morning.
+        return HomeStatus(
+            problems: problems,
+            readyText: napText ?? readyText(nextRing: nextRing, now: now, calendar: calendar)
+        )
     }
 
     /// "Ready for tomorrow", "Ready for today" or "Ready for Monday".

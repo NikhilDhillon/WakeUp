@@ -7,6 +7,8 @@ struct DifficultySection: View {
     @Binding var chainLength: Int
     @Binding var intervalMinutes: Int
     @Binding var followUpMinutes: Int
+    /// False where the follow-up check is set elsewhere (the Nap sheet).
+    var showsFollowUp = true
     @State private var showingCustom = false
 
     var body: some View {
@@ -18,10 +20,12 @@ struct DifficultySection: View {
             if difficulty == .custom || showingCustom {
                 Stepper("Rings up to \(chainLength) times", value: $chainLength, in: WakeAlarm.chainLengthRange)
                 Stepper("Every \(intervalMinutes) min", value: $intervalMinutes, in: WakeAlarm.chainIntervalRange)
-                Picker("Check again after", selection: $followUpMinutes) {
-                    Text("Off").tag(0)
-                    ForEach(WakeAlarm.followUpChoices.filter { $0 > 0 }, id: \.self) { minutes in
-                        Text("\(minutes) min").tag(minutes)
+                if showsFollowUp {
+                    Picker("Check again after", selection: $followUpMinutes) {
+                        Text("Off").tag(0)
+                        ForEach(WakeAlarm.followUpChoices.filter { $0 > 0 }, id: \.self) { minutes in
+                            Text("\(minutes) min").tag(minutes)
+                        }
                     }
                 }
             } else {
@@ -58,7 +62,10 @@ struct DifficultySection: View {
     }
 
     private var difficultyFooter: String {
-        AlarmDifficulty.summary(
+        if !showsFollowUp {
+            return AlarmDifficulty.ringsSummary(chainLength: chainLength, intervalMinutes: intervalMinutes)
+        }
+        return AlarmDifficulty.summary(
             chainLength: chainLength, intervalMinutes: intervalMinutes, followUpMinutes: followUpMinutes
         )
     }

@@ -42,6 +42,53 @@ struct ScheduleStore {
 
     func clear() {
         defaults.removeObject(forKey: chainsKey)
+        defaults.removeObject(forKey: napKey)
+    }
+
+    // MARK: Nap
+
+    private let napKey = "schedule.nap"
+    private let napRecordsKey = "history.naps"
+    /// How many finished naps are remembered.
+    static let napRecordsKept = 100
+
+    /// The nap that's set, ringing or waiting for its follow-up. nil when none.
+    var nap: NapSession? {
+        get { read(NapSession.self, key: napKey) }
+        nonmutating set {
+            if let newValue {
+                write(newValue, key: napKey)
+            } else {
+                defaults.removeObject(forKey: napKey)
+            }
+        }
+    }
+
+    /// Finished naps, oldest first, for History.
+    var napRecords: [NapRecord] {
+        read([NapRecord].self, key: napRecordsKey) ?? []
+    }
+
+    func addNapRecord(_ record: NapRecord) {
+        let kept = napRecords.filter { $0.id != record.id } + [record]
+        write(Array(kept.suffix(Self.napRecordsKept)), key: napRecordsKey)
+    }
+
+    /// "Clear history" forgets these along with the photo attempts.
+    func clearNapRecords() {
+        defaults.removeObject(forKey: napRecordsKey)
+    }
+
+    /// Marks the nap as rung once its chain has started, which locks
+    /// "Cancel nap". Returns the nap as saved.
+    @discardableResult
+    func markNapRungIfStarted(now: Date) -> NapSession? {
+        guard var nap, !nap.hasRung,
+              chains.contains(where: { $0.kind == .nap && $0.alarmID == nap.id && $0.hasStarted(at: now) })
+        else { return self.nap }
+        nap.hasRung = true
+        self.nap = nap
+        return nap
     }
 
     // MARK: Missed mornings

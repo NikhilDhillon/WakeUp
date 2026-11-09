@@ -37,6 +37,8 @@ struct ScheduledChain: Codable, Equatable, Identifiable, Sendable {
         case followUp
         /// A developer test chain. The planner never touches these.
         case test
+        /// A nap timer's chain. Not repeated; the planner leaves it alone.
+        case nap
     }
 
     var id: UUID
@@ -102,6 +104,11 @@ struct ScheduledChain: Codable, Equatable, Identifiable, Sendable {
     }
 
     func hasStarted(at now: Date) -> Bool { start <= now }
+
+    /// A nap's chain, or the "Still at your desk?" chain after a nap pass.
+    var belongsToNap: Bool {
+        kind == .nap || (kind == .followUp && signature == NapSession.signature)
+    }
 
     /// Which ring is current (1-based) and when the next one comes, from the
     /// chain's start and interval. `next` is nil on the last ring. Before the

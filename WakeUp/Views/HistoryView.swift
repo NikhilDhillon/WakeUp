@@ -8,6 +8,10 @@ struct HistoryView: View {
     @Query private var alarms: [WakeAlarm]
     @State private var confirmingClear = false
 
+    private var naps: [HistoryMath.NapSummary] {
+        HistoryMath.napSummaries(records: ScheduleStore().napRecords, attempts: attempts.map(\.info))
+    }
+
     private var mornings: [MorningSummary] {
         HistoryMath.summaries(of: attempts.map { attempt in
             var info = attempt.info
@@ -34,7 +38,7 @@ struct HistoryView: View {
                 StreakRow(streak: HistoryView.streak(attempts: attempts))
             }
 
-            if attempts.isEmpty {
+            if attempts.isEmpty && naps.isEmpty {
                 ContentUnavailableView(
                     "No mornings yet",
                     systemImage: "sun.max",
@@ -46,7 +50,7 @@ struct HistoryView: View {
             ForEach(mornings) { morning in
                 Section {
                     summaryRow(morning)
-                    ForEach(attempts.filter { Calendar.current.isDate($0.date, inSameDayAs: morning.day) }) { attempt in
+                    ForEach(attempts.filter { $0.kind != .nap && Calendar.current.isDate($0.date, inSameDayAs: morning.day) }) { attempt in
                         AttemptRow(attempt: attempt, alarmTime: alarmTime(of: attempt))
                     }
                 } header: {
@@ -54,7 +58,19 @@ struct HistoryView: View {
                 }
             }
 
-            if !attempts.isEmpty {
+            if !naps.isEmpty {
+                Section {
+                    ForEach(naps) { nap in
+                        NapRow(nap: nap)
+                    }
+                } header: {
+                    Text("Naps")
+                } footer: {
+                    Text("Naps don't count toward your streak.")
+                }
+            }
+
+            if !attempts.isEmpty || !naps.isEmpty {
                 Section {
                     Button("Clear history", role: .destructive) { confirmingClear = true }
                 } footer: {
@@ -67,6 +83,7 @@ struct HistoryView: View {
             Button("Delete history", role: .destructive) {
                 for attempt in attempts { context.delete(attempt) }
                 ScheduleStore().clearMissedDays()
+                ScheduleStore().clearNapRecords()
             }
         }
     }
@@ -111,6 +128,25 @@ struct HistoryView: View {
 
     static func passDays(_ attempts: [ProofAttempt]) -> Set<Date> {
         Set(attempts.filter { $0.kind == .wake && $0.passed }.map(\.date))
+    }
+}
+
+private struct NapRow: View {
+    let nap: HistoryMath.NapSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Label {
+                Text(HistoryMath.napLine(nap))
+            } icon: {
+                Image(systemName: nap.upAt == nil ? "moon.zzz.fill" : "powersleep")
+                    .foregroundStyle(nap.upAt == nil ? Color.secondary : Color.accentColor)
+            }
+            Text(nap.startedAt, format: .dateTime.weekday(.abbreviated).month().day().hour().minute())
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
