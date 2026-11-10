@@ -107,7 +107,6 @@ struct NextAlarmCard: View {
         Button(action: onOpenPlace) {
             HStack(spacing: 12) {
                 if let mission, mission.isReady {
-                    MissionThumbnail(mission: mission, size: 48)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(mission.name).font(.headline).foregroundStyle(Color.primary)
                         Text(mission.proofDescription)
